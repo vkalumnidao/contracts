@@ -2,7 +2,7 @@
 // Unlike ton-compiler's compileFunc this function don't include stdlib.fc
 //
 import { readFile, writeFile } from "fs/promises";
-import { compileFift, executeFunc } from "ton-compiler";
+import { compileFift, executeFunc } from "tonc";
 import { createTempFile } from "./createTempFile";
 import { Cell } from "ton";
 

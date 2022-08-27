@@ -16,8 +16,8 @@
     "@types/uuid": "^8.3.4",
     "bn.js": "^5.2.1",
     "ton": "^11.18.2",
-    "ton-compiler": "^1.0.0",
     "ton-contract-executor": "^0.5.2",
+    "tonc": "^1.0.0",
     "uuid": "^8.3.2"
   }
 }
