@@ -7,6 +7,7 @@ Collection of TON smart contracts to run VK Alumni DAO
 Install nodejs latest stable version.
 
 Run `npm i` to install dependencies.
+Run `npx func-install` to download TON binaries
 Run `make test` to run tests.
 
 ## Quirks
