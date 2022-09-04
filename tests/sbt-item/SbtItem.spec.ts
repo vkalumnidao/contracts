@@ -39,6 +39,7 @@ const pubKey = new BN(
 );
 
 const OWNER_ADDRESS = randomAddress();
+const AUTHORITY_ADDRESS = randomAddress();
 const COLLECTION_ADDRESS = randomAddress();
 const EDITOR_ADDRESS = randomAddress();
 
@@ -46,6 +47,7 @@ const defaultConfig: SbtItemData = {
   index: 777,
   collectionAddress: COLLECTION_ADDRESS,
   ownerAddress: OWNER_ADDRESS,
+  authorityAddress: AUTHORITY_ADDRESS,
   content: "test",
   ownerPubKey: pubKey,
   nonce: 1,
@@ -55,6 +57,7 @@ const singleConfig: SbtSingleData = {
   ownerAddress: OWNER_ADDRESS,
   editorAddress: EDITOR_ADDRESS,
   content: "test_content",
+  authorityAddress: AUTHORITY_ADDRESS,
   ownerPubKey: pubKey,
   nonce: 1,
 };
@@ -233,23 +236,16 @@ describe("sbt item smc", () => {
     expect(await sbt.getPubKey()).toEqual(pubKey);
   });
 
-  it("should destroy pull ownership", async () => {
+  it("should destroy", async () => {
     let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
-    let newOwner = randomAddress();
     let res = await sbt.contract.sendInternalMessage(
       new InternalMessage({
         to: sbt.address,
-        from: newOwner,
+        from: defaultConfig.ownerAddress,
         value: toNano(1),
         bounce: false,
         body: new CommonMessageInfo({
-          body: new CellMessage(
-            Queries.pullOwnership({
-              nonce: 1,
-              key: privateKey,
-              responseTo: randomAddress(),
-            })
-          ),
+          body: new CellMessage(Queries.destroy({})),
         }),
       })
     );
@@ -262,9 +258,66 @@ describe("sbt item smc", () => {
     }
 
     expect(data.ownerAddress).toEqual(null);
+    expect(await sbt.getPubKey()).toEqual(new BN(0));
+  });
 
-    expect(await sbt.getNonce()).not.toEqual(new BN(1));
-    expect(await sbt.getPubKey()).toEqual(pubKey);
+  it("should revoke", async () => {
+    let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
+    let res = await sbt.contract.sendInternalMessage(
+      new InternalMessage({
+        to: sbt.address,
+        from: defaultConfig.authorityAddress,
+        value: toNano(1),
+        bounce: false,
+        body: new CommonMessageInfo({
+          body: new CellMessage(Queries.revoke({})),
+        }),
+      })
+    );
+
+    expect(res.exit_code).toEqual(0);
+
+    let data = await sbt.getNftData();
+    if (!data.isInitialized) {
+      throw new Error();
+    }
+
+    expect(data.ownerAddress).toEqual(null);
+    expect(await sbt.getPubKey()).toEqual(new BN(0));
+  });
+
+  it("should not revoke", async () => {
+    let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
+    let res = await sbt.contract.sendInternalMessage(
+      new InternalMessage({
+        to: sbt.address,
+        from: defaultConfig.ownerAddress,
+        value: toNano(1),
+        bounce: false,
+        body: new CommonMessageInfo({
+          body: new CellMessage(Queries.revoke({})),
+        }),
+      })
+    );
+
+    expect(res.exit_code).toEqual(401);
+  });
+
+  it("should not destroy", async () => {
+    let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
+    let res = await sbt.contract.sendInternalMessage(
+      new InternalMessage({
+        to: sbt.address,
+        from: defaultConfig.authorityAddress,
+        value: toNano(1),
+        bounce: false,
+        body: new CommonMessageInfo({
+          body: new CellMessage(Queries.destroy({})),
+        }),
+      })
+    );
+
+    expect(res.exit_code).toEqual(401);
   });
 
   it("random guy prove ownership", async () => {
@@ -272,7 +325,7 @@ describe("sbt item smc", () => {
     let someGuy = randomAddress();
 
     let dataCell = new Cell();
-    dataCell.bits.writeUint(777, 16);
+    dataCell.bits.writeUint(888, 16);
 
     let res = await sbt.contract.sendInternalMessage(
       new InternalMessage({
@@ -285,14 +338,33 @@ describe("sbt item smc", () => {
             Queries.proveOwnership({
               to: randomAddress(),
               data: dataCell,
-              withContent: false,
+              withContent: true,
             })
           ),
         }),
       })
     );
 
-    expect(res.exit_code).toEqual(401);
+    expect(res.exit_code).toEqual(0);
+
+    let [responseMessage] = res.actionList as [SendMsgAction];
+    let response = responseMessage.message.body.beginParse();
+
+    let op = response.readUintNumber(32);
+    let queryId = response.readUintNumber(64);
+    let index = response.readUintNumber(256);
+    let owner = response.readAddress() as Address;
+    let data = response.readRef();
+    let withCont = response.readBit();
+    let cont = response.readRef();
+
+    expect(op).toEqual(OperationCodes.VerifyOwnership);
+    expect(queryId).toEqual(0);
+    expect(index).toEqual(777);
+    expect(owner.toFriendly()).toEqual(defaultConfig.ownerAddress.toFriendly());
+    expect(data.readUint(16).toNumber()).toEqual(888);
+    expect(withCont).toEqual(true);
+    expect(cont.readBuffer(4).toString()).toEqual("test");
   });
 
   it("should prove ownership with content", async () => {
