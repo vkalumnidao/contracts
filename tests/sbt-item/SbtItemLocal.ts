@@ -10,13 +10,7 @@ import {
   toNano,
 } from "ton";
 import BN from "bn.js";
-import {
-  buildSbtItemDataCell,
-  buildSingleSbtDataCell,
-  SbtItemData,
-  SbtSingleData,
-  Queries,
-} from "./SbtItem.data";
+import { buildSbtItemDataCell, SbtItemData, Queries } from "./SbtItem.data";
 import { SbtItemSource } from "./SbtItem.source";
 import { decodeOffChainContent } from "../utils/nftContent";
 import { compileFunc } from "../utils/compileFunc";

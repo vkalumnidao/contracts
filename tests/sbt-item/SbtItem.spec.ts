@@ -14,7 +14,6 @@ import {
   Queries,
 } from "./SbtItem.data";
 import { SbtItemLocal } from "./SbtItemLocal";
-import { decodeOffChainContent } from "../utils/nftContent";
 import { SendMsgAction } from "ton-contract-executor";
 import BN = require("bn.js");
 
@@ -49,15 +48,6 @@ const defaultConfig: SbtItemData = {
   ownerAddress: OWNER_ADDRESS,
   authorityAddress: AUTHORITY_ADDRESS,
   content: "test",
-  ownerPubKey: pubKey,
-  nonce: 1,
-};
-
-const singleConfig: SbtSingleData = {
-  ownerAddress: OWNER_ADDRESS,
-  editorAddress: EDITOR_ADDRESS,
-  content: "test_content",
-  authorityAddress: AUTHORITY_ADDRESS,
   ownerPubKey: pubKey,
   nonce: 1,
 };
