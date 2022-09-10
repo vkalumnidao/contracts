@@ -2,7 +2,10 @@ import { SmartContract } from "ton-contract-executor";
 import { compileFunc } from "../utils/compileFunc";
 import { DaoProposalsSource } from "./DaoProposals.source";
 import { Address, contractAddress } from "ton";
-import { DaoProposalsData, buildDaoProposalsCells } from "./DaoProposals.data";
+import {
+  DaoProposalsState,
+  serializeDaoProposalsState,
+} from "./DaoProposals.data";
 
 export class DaoProposalsLocal {
   private constructor(
@@ -10,10 +13,10 @@ export class DaoProposalsLocal {
     public readonly address: Address
   ) {}
 
-  static async createFromConfig(config: DaoProposalsData) {
+  static async createFromConfig(config: DaoProposalsState) {
     let code = await compileFunc(DaoProposalsSource);
 
-    let data = buildDaoProposalsCells(config);
+    let data = serializeDaoProposalsState(config);
     let contract = await SmartContract.fromCell(code.cell, data, {
       debug: true,
     });

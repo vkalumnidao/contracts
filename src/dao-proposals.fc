@@ -1,3 +1,37 @@
+;; Proposals type
+
+;; with_proof#38061b82 dest:MsgAddressInt body:^X with_content:Bool = WithProof X
+
+;; proof index:uint256 owner_address:MsgAddressInt body:^X with_content:(## 1) content:with_content?^Cell = Proof X
+
+;; text$_ ref:^Cell = Text
+
+;; candidate$_ id:uint32 bio:Text = Candidate
+
+;; add_member_proposal$0001 candidate:Candidate description:Text = Proposal
+;; remove_member_proposal$0010 candidate_id:uint32 description:Text = Proposal
+;; generic_proposal$0011 topic:Text description:Text = Proposal
+
+;; cast_yay$0 proposal_id:uint8 = CastVote
+;; cast_nay$1 proposal_id:uint8 = CastVote
+
+;; state$_ owner_id:unit32 proposals:HashMapE 3 ProposalState = State
+;; proposal_state expriration_date:uint64 yay:(HashmapE 32 True) nay:(HashmapE 32 True) body:^Proposal = ProposalState
+
+global int storage::owner_id;
+global cell storage::proposals;
+
+() load_storage() inline {
+  var state = get_data().begin_parse();
+  storage::owner_id = state~load_uint(32);
+  storage::proposals = state~load_dict();
+  return ();
+}
+
+(slice) get_state() method_id {
+  return get_data().begin_parse();
+}
+
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
   if (in_msg_body.slice_empty?()) { ;; ignore empty messages
     return ();
