@@ -1,4 +1,12 @@
-import { Cell, Slice, BitString, beginDict, beginCell, Builder } from "ton";
+import {
+  Cell,
+  Slice,
+  BitString,
+  beginDict,
+  beginCell,
+  Builder,
+  Address,
+} from "ton";
 
 export function never(_: never, msg: string): never {
   throw new Error(`never: ${msg}`);
@@ -48,7 +56,7 @@ const PROPOSAL_GENERIC_TAG = TLTag(PORPOSAL_TAG_LENGTH, 3);
 
 type MemberVotes = Map<number, true>;
 
-type ProposalState = {
+export type ProposalState = {
   proposal: Proposal;
   expiration_date: number;
   yay: MemberVotes;
@@ -59,6 +67,37 @@ const PROPOSAL_BITS = 3;
 export type DaoProposalsState = {
   owner_id: number;
   proposals: Map<number, ProposalState>;
+};
+
+export type CastVote = {
+  vote: boolean;
+  proposal_id: number;
+};
+
+type IEventCreateProposal = {
+  kind: "create_proposal";
+  expiration_date: number;
+  body: Proposal;
+};
+
+type IEventVote = {
+  kind: "vote";
+  cast_vote: CastVote;
+};
+
+type IEventUpdateCode = {
+  kind: "update_code";
+  code: Cell;
+};
+
+type IEvent = IEventCreateProposal | IEventVote | IEventUpdateCode;
+
+type Proof<T> = {
+  index: number;
+  owner_address: Address;
+  body: T;
+  with_content: boolean;
+  content?: Cell;
 };
 
 function serializeText(builder: Builder, text: Text) {
@@ -157,7 +196,7 @@ function serializeProposal(builder: Builder, proposal: Proposal) {
   }
 }
 
-function unserializeProposal(parser: Slice): Proposal {
+export function unserializeProposal(parser: Slice): Proposal {
   const tag = parser.readBitString(PORPOSAL_TAG_LENGTH);
   // equals method doesnt work, because for some reason readBitString create bitstring of 1023 length
   if (tag.toString() === PROPOSAL_ADD_TAG.toString()) {
@@ -223,7 +262,7 @@ function serializeProposalState(
   builder.storeRef(propCell.endCell());
 }
 
-function unserializeProposalState(parser: Slice): ProposalState {
+export function unserializeProposalState(parser: Slice): ProposalState {
   const expiration = unserializeTime(parser);
   const yay = unserializeMemberVotes(parser);
   const nay = unserializeMemberVotes(parser);

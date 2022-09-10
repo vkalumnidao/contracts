@@ -16,10 +16,22 @@
 ;; cast_nay$1 proposal_id:uint8 = CastVote
 
 ;; state$_ owner_id:unit32 proposals:HashMapE 3 ProposalState = State
-;; proposal_state expriration_date:uint64 yay:(HashmapE 32 True) nay:(HashmapE 32 True) body:^Proposal = ProposalState
+;; proposal_state$_ expiration_date:uint64 yay:(HashmapE 32 True) nay:(HashmapE 32 True) body:^Proposal = ProposalState
+
+;; ievent_create_proposal$0001 expiration_date:uint64 body:^Proposal = IEvent
+;; ievent_vote$0010 vote:CastVote = IEvent
+;; ievent_update_code$0011 code:^Cell= IEvent
+;; event$_ body:(WithProof IEvent) = Event
+
 
 global int storage::owner_id;
 global cell storage::proposals;
+
+const PROPOSALS_BITS = 3;
+const MEMBER_ID_BITS = 32;
+const TS_BITS = 64;
+
+const DICT_ERROR = 10;
 
 () load_storage() inline {
   var state = get_data().begin_parse();
@@ -28,8 +40,71 @@ global cell storage::proposals;
   return ();
 }
 
-(slice) get_state() method_id {
+(slice) storage_get_state() method_id {
   return get_data().begin_parse();
+}
+
+(int, cell) storate_get_dao_state() {
+  var state = storage_get_state();
+  return (state~load_uint(MEMBER_ID_BITS), state~load_dict());
+}
+
+(int) storage_get_owner_id() method_id {
+  var (owner_id, _) = storate_get_dao_state();
+  return owner_id;
+}
+
+(cell) storage_get_proposals() {
+  var (_, proposals) = storate_get_dao_state();
+  return proposals;
+}
+
+(int, cell, cell, cell) storage_get_proposal(int proposal_id) {
+  var proposals = storage_get_proposals();
+  var (proposal, success) = proposals.udict_get?(PROPOSALS_BITS, proposal_id);
+  throw_unless(DICT_ERROR, success);
+  var expiration_date = proposal~load_uint(TS_BITS);
+  var yay = proposal~load_dict();
+  var nay = proposal~load_dict();
+  var body = proposal~load_ref();
+  return (expiration_date, yay, nay, body);
+}
+
+(int) storage_count_votes(cell votes) {
+  var count = 0;
+  var current_key = 0;
+
+  if (votes.dict_empty?()) {
+    return 0;
+  }
+
+  do {
+    var (current_key, _, success) = votes.udict_get_next?(MEMBER_ID_BITS, current_key);
+    if (success) {
+      count += 1;
+    }
+  } until (success)
+  return count;
+}
+
+(int) storage_count_proposal_yays(int proposal_id) method_id {
+  var (_, yay, _, _) = storage_get_proposal(proposal_id);
+  return storage_count_votes(yay);
+}
+
+(int) storage_count_proposal_nays(int proposal_id) method_id {
+  var (_, _, nay, _) = storage_get_proposal(proposal_id);
+  return storage_count_votes(nay);
+}
+
+(int) storage_get_proposal_expiration_date(int proposal_id) method_id {
+  var  (date, _, _, _) = storage_get_proposal(proposal_id);
+  return (date);
+}
+
+(slice) storage_get_proposal_info(int proposal_id) method_id {
+  var  (_, _, _, proposal) = storage_get_proposal(proposal_id);
+  return proposal.begin_parse();
 }
 
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {

@@ -108,7 +108,7 @@ int builder_depth(builder b) asm "BDEPTH";
 
 builder begin_cell() asm "NEWC";
 cell end_cell(builder b) asm "ENDC";
-    builder store_ref(builder b, cell c) asm(c b) "STREF";
+builder store_ref(builder b, cell c) asm(c b) "STREF";
 ;; builder store_uint(builder b, int x, int len) asm(x b len) "STUX";
 ;; builder store_int(builder b, int x, int len) asm(x b len) "STIX";
 builder store_slice(builder b, slice s) asm "STSLICER";
