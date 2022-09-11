@@ -25,8 +25,9 @@ import { compileFunc } from "../utils/compileFunc";
 
 const TON_TRUE = -1;
 const TON_FALSE = 0;
-
 const DICT_ERROR = 10;
+const INVALID_ACTION_ERROR = 34;
+const DOUBLE_VOTE_ERROR = 1001;
 
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
@@ -223,16 +224,21 @@ describe("DAO proposals", () => {
     it("votes for existing proposal", async () => {
       const proposalId = 0;
       let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
+
+      // check voting for
       let response = await dao.vote(randomAddress(), 10, proposalId, true);
       expect(response.type).toEqual("success");
       expect(await dao.countYayVotes(proposalId)).toEqual(2);
 
+      // check voting against
       response = await dao.vote(randomAddress(), 11, proposalId, false);
       expect(response.type).toBe("success");
       expect(await dao.countNayVotes(proposalId)).toEqual(1);
 
+      // check double votes
       response = await dao.vote(randomAddress(), 10, proposalId, false);
-      expect(response.type).toBe("failed");
+      expect(response.type).toEqual("failed");
+      expect(response.exit_code).toEqual(DOUBLE_VOTE_ERROR);
       expect(await dao.countNayVotes(proposalId)).toEqual(1);
     });
 
