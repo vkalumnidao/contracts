@@ -1,5 +1,7 @@
 import { DaoProposalsLocal } from "./DaoProposalsLocal";
 import {
+  Address,
+  beginCell,
   Cell,
   CellMessage,
   CommonMessageInfo,
@@ -11,21 +13,34 @@ import {
 import { randomAddress } from "../utils/randomAddress";
 import {
   DaoProposalsState,
+  serializeIEvent,
+  serializeProof,
   unserializeDaoProposalsState,
   unserializeProposal,
+  IEvent,
 } from "./DaoProposals.data";
 import BN from "bn.js";
+import { SbtItemSource } from "../sbt-item/SbtItem.source";
+import { compileFunc } from "../utils/compileFunc";
 
 const TON_TRUE = -1;
 const TON_FALSE = 0;
 
+export const cellToBoc = (cell: Cell) => {
+  return cell.toBoc({ idx: false }).toString("base64");
+};
+
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
   proposals: new Map(),
+  sbt_item_code: new Cell(),
+  nft_collection_address: randomAddress(),
 };
 
 const fullConfig: DaoProposalsState = {
   owner_id: 1,
+  sbt_item_code: new Cell(),
+  nft_collection_address: randomAddress(),
   proposals: new Map([
     [
       0,
@@ -51,7 +66,24 @@ const fullConfig: DaoProposalsState = {
     ],
   ]),
 };
+
+function getState(state: Partial<DaoProposalsState>): DaoProposalsState {
+  return { ...fullConfig, ...state };
+}
+
 const OWNER_ADDRESS = randomAddress();
+
+function expectStateEquality(
+  first: DaoProposalsState,
+  second: DaoProposalsState
+) {
+  expect(first.owner_id).toEqual(first.owner_id);
+  expect(first.nft_collection_address).toEqual(first.nft_collection_address);
+  expect(first.proposals).toEqual(first.proposals);
+  expect(first.sbt_item_code.toString()).toEqual(
+    second.sbt_item_code.toString()
+  );
+}
 
 describe("DAO proposals", () => {
   it("ignores external messages", async () => {
@@ -93,13 +125,15 @@ describe("DAO proposals", () => {
     expect(result.type).toEqual("success");
     let returnedState = result.result[0] as Slice;
     const parsedState = unserializeDaoProposalsState(returnedState);
-    expect(parsedState).toEqual(fullConfig);
+    expectStateEquality(parsedState, fullConfig);
   });
 
   it("returns owner_id correctly", async () => {
     let dao = await DaoProposalsLocal.createFromConfig({
       owner_id: 10,
       proposals: new Map(),
+      sbt_item_code: new Cell(),
+      nft_collection_address: randomAddress(),
     });
     const result = await dao.contract.invokeGetMethod(
       "storage_get_owner_id",
@@ -175,5 +209,68 @@ describe("DAO proposals", () => {
     const returnedProposal = result.result[0] as Slice;
     const proposal = unserializeProposal(returnedProposal);
     expect(proposal).toEqual(fullConfig.proposals.get(0)?.proposal);
+  });
+
+  it("sends check proof operation with success", async () => {
+    const sbtItemCode = await compileFunc(SbtItemSource);
+    const daoCollectionAddress = randomAddress();
+
+    let dao = await DaoProposalsLocal.createFromConfig(
+      getState({
+        sbt_item_code: sbtItemCode.cell,
+        nft_collection_address: daoCollectionAddress,
+      })
+    );
+    const membedId = 10;
+    const ownerAddress = randomAddress();
+    const expected_address_t = await dao.contract.invokeGetMethod(
+      "calculate_nft_item_address_init",
+      [
+        {
+          type: "int",
+          value: membedId.toString(),
+        },
+        {
+          type: "cell",
+          value: cellToBoc(sbtItemCode.cell),
+        },
+        {
+          type: "cell_slice",
+          value: cellToBoc(
+            beginCell().storeAddress(daoCollectionAddress).endCell()
+          ),
+        },
+      ]
+    );
+
+    const expected_address = (
+      expected_address_t.result[0] as Slice
+    ).readAddress();
+
+    const bodyCell = beginCell();
+    serializeProof<IEvent>(
+      bodyCell,
+      {
+        body: {
+          kind: "check_proof",
+        },
+        index: 10,
+        owner_address: ownerAddress,
+        with_content: false,
+      },
+      serializeIEvent
+    );
+    let res = await dao.contract.sendInternalMessage(
+      new InternalMessage({
+        to: dao.address,
+        body: new CommonMessageInfo({
+          body: new CellMessage(bodyCell.endCell()),
+        }),
+        bounce: false,
+        from: expected_address,
+        value: toNano(1),
+      })
+    );
+    expect(res.type).toEqual("success");
   });
 });

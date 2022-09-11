@@ -66,12 +66,22 @@ export type ProposalState = {
 const PROPOSAL_BITS = 3;
 export type DaoProposalsState = {
   owner_id: number;
+  sbt_item_code: Cell;
+  nft_collection_address: Address;
   proposals: Map<number, ProposalState>;
 };
 
 export type CastVote = {
   vote: boolean;
   proposal_id: number;
+};
+
+const IEVENT_TAG_LENGTH = 4;
+const IEVENT_TAGS: Record<IEvent["kind"], BitString> = {
+  check_proof: TLTag(IEVENT_TAG_LENGTH, 1),
+  create_proposal: TLTag(IEVENT_TAG_LENGTH, 2),
+  vote: TLTag(IEVENT_TAG_LENGTH, 3),
+  update_code: TLTag(IEVENT_TAG_LENGTH, 4),
 };
 
 type IEventCreateProposal = {
@@ -90,7 +100,11 @@ type IEventUpdateCode = {
   code: Cell;
 };
 
-type IEvent = IEventCreateProposal | IEventVote | IEventUpdateCode;
+export type IEvent =
+  | IEventCreateProposal
+  | IEventVote
+  | IEventUpdateCode
+  | { kind: "check_proof" };
 
 type Proof<T> = {
   index: number;
@@ -98,6 +112,10 @@ type Proof<T> = {
   body: T;
   with_content: boolean;
   content?: Cell;
+};
+
+type Event<T> = {
+  body: Proof<T>;
 };
 
 function serializeText(builder: Builder, text: Text) {
@@ -284,12 +302,19 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
   });
   return beginCell()
     .storeUint(state.owner_id, MEMBER_ID_BITS)
+    .storeRef(state.sbt_item_code)
+    .storeAddress(state.nft_collection_address)
     .storeDict(dict.endDict())
     .endCell();
 }
 
 export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   const owner = parser.readUintNumber(MEMBER_ID_BITS);
+  const code = parser.readCell();
+  const address = parser.readAddress();
+  if (!address) {
+    throw new Error("Coudlnt unserialize nft_collection_address");
+  }
   const proposalsStr = unserializeDict(PROPOSAL_BITS, parser, (slice) => {
     return unserializeProposalState(slice);
   });
@@ -300,5 +325,53 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   return {
     owner_id: owner,
     proposals,
+    nft_collection_address: address,
+    sbt_item_code: code,
   };
+}
+
+export function serializeCastVote(builder: Builder, cast: CastVote) {
+  builder.storeBit(!cast.vote);
+  builder.storeUint(cast.proposal_id, PROPOSAL_BITS);
+}
+
+export function serializeIEvent(builder: Builder, event: IEvent) {
+  const tag = IEVENT_TAGS[event.kind];
+  if (!tag) {
+    throw new Error(`Tag for ${event.kind} is not defined`);
+  }
+  builder.storeBitString(tag);
+  switch (event.kind) {
+    case "create_proposal":
+      serializeTime(builder, event.expiration_date);
+      const pcell = beginCell();
+      serializeProposal(pcell, event.body);
+      builder.storeRef(pcell.endCell());
+      break;
+    case "vote":
+      serializeCastVote(builder, event.cast_vote);
+      break;
+    case "update_code":
+      builder.storeRef(event.code);
+      break;
+    case "check_proof":
+      builder.storeRef(new Cell());
+      break;
+    default:
+      never(event, "Unknown event " + event);
+  }
+}
+
+export function serializeProof<T>(
+  builder: Builder,
+  proof: Proof<T>,
+  serializer: (b: Builder, d: T) => void
+) {
+  builder.storeUint(proof.index, 256).storeAddress(proof.owner_address);
+  const bodyCell = beginCell();
+  serializer(bodyCell, proof.body);
+  builder.storeRef(bodyCell.endCell()).storeBit(proof.with_content);
+  if (proof.with_content && proof.content) {
+    builder.storeRef(proof.content);
+  }
 }
