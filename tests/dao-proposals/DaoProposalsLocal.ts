@@ -15,10 +15,16 @@ import {
 import {
   DaoProposalsState,
   IEvent,
+  IEventCreateProposal,
+  MembedId,
+  Proposal,
+  ProposalState,
   serializeDaoProposalsState,
   serializeIEvent,
   serializeProof,
   unserializeDaoProposalsState,
+  unserializeMemberVotes,
+  unserializeProposal,
 } from "./DaoProposals.data";
 import { SbtItemSource } from "../sbt-item/SbtItem.source";
 import BN from "bn.js";
@@ -72,7 +78,9 @@ export class DaoProposalsLocal {
           type: "cell_slice",
           value: cellToBoc(
             beginCell()
-              .storeAddress(this.initState.nft_collection_address)
+              .storeAddress(
+                Address.parseRaw(this.initState.nft_collection_address)
+              )
               .endCell()
           ),
         },
@@ -85,7 +93,7 @@ export class DaoProposalsLocal {
       {
         body: event,
         index: memberId,
-        owner_address: ownerAddress,
+        owner_address: ownerAddress.toString(),
         with_content: false,
       },
       serializeIEvent
@@ -169,5 +177,56 @@ export class DaoProposalsLocal {
 
     const count = vote_count.result[0] as BN;
     return count.toNumber();
+  }
+
+  async selectNewProposalId() {
+    const proposal_id = await this.contract.invokeGetMethod(
+      "select_new_proposal_id",
+      []
+    );
+    if (proposal_id.type === "failed") {
+      return { result: proposal_id, id: 0 };
+    }
+    const count = proposal_id.result[0] as BN;
+    return { result: proposal_id, id: count.toNumber() };
+  }
+
+  async createProposal(
+    ownerAddress: Address,
+    memberId: MembedId,
+    expirationDate: number,
+    prop: Proposal
+  ) {
+    return this.sendWithProof(ownerAddress, memberId, {
+      kind: "create_proposal",
+      body: prop,
+      expiration_date: expirationDate,
+    });
+  }
+
+  async getProposal(proposalId: number): Promise<ProposalState> {
+    const proposal = await this.contract.invokeGetMethod(
+      "storage_get_proposal",
+      [
+        {
+          type: "int",
+          value: proposalId.toString(),
+        },
+      ]
+    );
+    if (proposal.type === "failed") {
+      console.log(proposal.logs);
+      throw new Error("Unable to get proposal with id: " + proposalId);
+    }
+    const creatodId = proposal.result[0] as BN;
+    const expiry = proposal.result[1] as BN;
+    const votes = proposal.result[2] as Cell;
+    const body = proposal.result[3] as Cell;
+    return {
+      expiration_date: expiry.toNumber(),
+      creator_id: creatodId.toNumber(),
+      proposal: unserializeProposal(body.beginParse()),
+      votes: unserializeMemberVotes(votes.beginParse()),
+    };
   }
 }

@@ -20,24 +20,25 @@ type Text = {
 type Candidate = {
   id: number;
   bio: Text;
+  address: string;
 };
 
-type MembedId = number;
+export type MembedId = number;
 const MEMBER_ID_BITS = 32;
 
-type ProposalAdd = {
+export type ProposalAdd = {
   kind: "add";
   candidate: Candidate;
   description: Text;
 };
 
-type ProposalRemove = {
+export type ProposalRemove = {
   kind: "remove";
   candidate_id: MembedId;
   description: Text;
 };
 
-type ProposalGeneric = {
+export type ProposalGeneric = {
   kind: "generic";
   topic: Text;
   description: Text;
@@ -49,7 +50,7 @@ function TLTag(length: number, value: number): BitString {
   return bit;
 }
 
-type Proposal = ProposalAdd | ProposalGeneric | ProposalRemove;
+export type Proposal = ProposalAdd | ProposalGeneric | ProposalRemove;
 const PORPOSAL_TAG_LENGTH = 4;
 const PROPOSAL_ADD_TAG = TLTag(PORPOSAL_TAG_LENGTH, 1);
 const PROPOSAL_REMOVE_TAG = TLTag(PORPOSAL_TAG_LENGTH, 2);
@@ -58,16 +59,17 @@ const PROPOSAL_GENERIC_TAG = TLTag(PORPOSAL_TAG_LENGTH, 3);
 type MemberVotes = [Set<MembedId>, Set<MembedId>];
 
 export type ProposalState = {
+  creator_id: MembedId;
   proposal: Proposal;
   expiration_date: number;
   votes: MemberVotes;
 };
 
-const PROPOSAL_BITS = 3;
+const PROPOSAL_BITS = 4;
 export type DaoProposalsState = {
   owner_id: number;
   sbt_item_code: Cell;
-  nft_collection_address: Address;
+  nft_collection_address: string;
   proposals: Map<number, ProposalState>;
 };
 
@@ -81,34 +83,27 @@ const IEVENT_TAGS: Record<IEvent["kind"], BitString> = {
   check_proof: TLTag(IEVENT_TAG_LENGTH, 1),
   create_proposal: TLTag(IEVENT_TAG_LENGTH, 2),
   vote: TLTag(IEVENT_TAG_LENGTH, 3),
-  update_code: TLTag(IEVENT_TAG_LENGTH, 4),
 };
 
-type IEventCreateProposal = {
+export type IEventCreateProposal = {
   kind: "create_proposal";
   expiration_date: number;
   body: Proposal;
 };
 
-type IEventVote = {
+export type IEventVote = {
   kind: "vote";
   cast_vote: CastVote;
-};
-
-type IEventUpdateCode = {
-  kind: "update_code";
-  code: Cell;
 };
 
 export type IEvent =
   | IEventCreateProposal
   | IEventVote
-  | IEventUpdateCode
   | { kind: "check_proof" };
 
 type Proof<T> = {
   index: number;
-  owner_address: Address;
+  owner_address: string;
   body: T;
   with_content: boolean;
   content?: Cell;
@@ -138,14 +133,33 @@ function unserializeText(parser: Slice): Text {
 
 function serializeCandidate(builder: Builder, cn: Candidate) {
   builder.storeUint(cn.id, MEMBER_ID_BITS);
+  if (cn.address) {
+    // this is needed for test to serialize incorrect data
+    serializeAddress(builder, cn.address);
+  }
   serializeText(builder, cn.bio);
+}
+
+function serializeAddress(builder: Builder, address: string) {
+  builder.storeAddress(Address.parseRaw(address));
+}
+
+function unserializeAddress(parser: Slice): string {
+  const address = parser.readAddress();
+  if (!address) {
+    throw new Error("Candidate without address");
+  }
+
+  return address.toString();
 }
 
 function unserializeCandidate(parser: Slice): Candidate {
   const id = parser.readUintNumber(MEMBER_ID_BITS);
+  const address = unserializeAddress(parser);
   const bio = unserializeText(parser.readCell().beginParse());
   return {
     bio,
+    address,
     id,
   };
 }
@@ -166,8 +180,12 @@ function unserializeProposalAdd(parser: Slice): ProposalAdd {
 }
 
 function serializeProposalRemove(builder: Builder, remove: ProposalRemove) {
-  builder.storeUint(remove.candidate_id, MEMBER_ID_BITS);
-  serializeText(builder, remove.description);
+  if (remove.candidate_id) {
+    builder.storeUint(remove.candidate_id, MEMBER_ID_BITS);
+  }
+  if (remove.description) {
+    serializeText(builder, remove.description);
+  }
 }
 
 function unserializeProposalRemove(parser: Slice): ProposalRemove {
@@ -181,8 +199,13 @@ function unserializeProposalRemove(parser: Slice): ProposalRemove {
 }
 
 function serializeProposalGeneric(builder: Builder, generic: ProposalGeneric) {
-  serializeText(builder, generic.topic);
-  serializeText(builder, generic.description);
+  if (generic.topic) {
+    // for tests
+    serializeText(builder, generic.topic);
+  }
+  if (generic.description) {
+    serializeText(builder, generic.description);
+  }
 }
 
 function unserializeProposalGeneric(parser: Slice): ProposalGeneric {
@@ -274,7 +297,7 @@ function bitStringToMemberIds(bitstring: BN): Set<MembedId> {
   return indexes;
 }
 
-function unserializeMemberVotes(parser: Slice): MemberVotes {
+export function unserializeMemberVotes(parser: Slice): MemberVotes {
   const votedString = parser.readUint(256);
   const votedForString = parser.readUint(256);
   const allVotes = bitStringToMemberIds(votedString);
@@ -287,6 +310,7 @@ function serializeProposalState(
   builder: Builder,
   proposalState: ProposalState
 ) {
+  builder.storeUint(proposalState.creator_id, MEMBER_ID_BITS);
   serializeTime(builder, proposalState.expiration_date);
   const votes = beginCell();
   serializeMemberVotes(votes, proposalState.votes);
@@ -297,10 +321,12 @@ function serializeProposalState(
 }
 
 export function unserializeProposalState(parser: Slice): ProposalState {
+  const creatorId = parser.readUintNumber(MEMBER_ID_BITS);
   const expiration = unserializeTime(parser);
   const votes = unserializeMemberVotes(parser.readRef());
   const proposal = unserializeProposal(parser.readRef());
   return {
+    creator_id: creatorId,
     expiration_date: expiration,
     votes,
     proposal,
@@ -314,21 +340,17 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
     serializeProposalState(builder, proposal);
     dict.storeCell(id, builder.endCell());
   });
-  return beginCell()
+  const builder = beginCell()
     .storeUint(state.owner_id, MEMBER_ID_BITS)
-    .storeRef(state.sbt_item_code)
-    .storeAddress(state.nft_collection_address)
-    .storeDict(dict.endDict())
-    .endCell();
+    .storeRef(state.sbt_item_code);
+  serializeAddress(builder, state.nft_collection_address);
+  return builder.storeDict(dict.endDict()).endCell();
 }
 
 export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   const owner = parser.readUintNumber(MEMBER_ID_BITS);
   const code = parser.readCell();
-  const address = parser.readAddress();
-  if (!address) {
-    throw new Error("Coudlnt unserialize nft_collection_address");
-  }
+  const address = unserializeAddress(parser);
   const proposalsStr = unserializeDict(PROPOSAL_BITS, parser, (slice) => {
     return unserializeProposalState(slice);
   });
@@ -365,9 +387,6 @@ export function serializeIEvent(builder: Builder, event: IEvent) {
     case "vote":
       serializeCastVote(builder, event.cast_vote);
       break;
-    case "update_code":
-      builder.storeRef(event.code);
-      break;
     case "check_proof":
       builder.storeRef(new Cell());
       break;
@@ -381,7 +400,8 @@ export function serializeProof<T>(
   proof: Proof<T>,
   serializer: (b: Builder, d: T) => void
 ) {
-  builder.storeUint(proof.index, 256).storeAddress(proof.owner_address);
+  builder.storeUint(proof.index, 256);
+  serializeAddress(builder, proof.owner_address);
   const bodyCell = beginCell();
   serializer(bodyCell, proof.body);
   builder.storeRef(bodyCell.endCell()).storeBit(proof.with_content);
