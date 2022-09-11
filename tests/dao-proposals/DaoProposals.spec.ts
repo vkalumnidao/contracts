@@ -26,6 +26,8 @@ import { compileFunc } from "../utils/compileFunc";
 const TON_TRUE = -1;
 const TON_FALSE = 0;
 
+const DICT_ERROR = 10;
+
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
   proposals: new Map(),
@@ -42,8 +44,7 @@ const fullConfig: DaoProposalsState = {
       0,
       {
         expiration_date: Date.now(),
-        nay: new Map(),
-        yay: new Map([[1, true]]),
+        votes: [new Set(), new Set([1])],
         proposal: {
           kind: "add",
           candidate: {
@@ -63,8 +64,11 @@ const fullConfig: DaoProposalsState = {
   ]),
 };
 
-function getState(state: Partial<DaoProposalsState>): DaoProposalsState {
-  return { ...fullConfig, ...state };
+async function getState(
+  state: Partial<DaoProposalsState>
+): Promise<DaoProposalsState> {
+  const sbtItemCode = await compileFunc(SbtItemSource);
+  return { ...fullConfig, ...{ sbt_item_code: sbtItemCode.cell }, ...state };
 }
 
 const OWNER_ADDRESS = randomAddress();
@@ -208,18 +212,35 @@ describe("DAO proposals", () => {
   });
 
   it("sends check proof operation with success", async () => {
-    const sbtItemCode = await compileFunc(SbtItemSource);
-    const daoCollectionAddress = randomAddress();
-
-    let dao = await DaoProposalsLocal.createFromConfig(
-      getState({
-        sbt_item_code: sbtItemCode.cell,
-        nft_collection_address: daoCollectionAddress,
-      })
-    );
+    let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
     const response = await dao.sendWithProof(randomAddress(), 10, {
       kind: "check_proof",
     });
     expect(response.type).toEqual("success");
+  });
+
+  describe("|voting", () => {
+    it("votes for existing proposal", async () => {
+      const proposalId = 0;
+      let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
+      let response = await dao.vote(randomAddress(), 10, proposalId, true);
+      expect(response.type).toEqual("success");
+      expect(await dao.countYayVotes(proposalId)).toEqual(2);
+
+      response = await dao.vote(randomAddress(), 11, proposalId, false);
+      expect(response.type).toBe("success");
+      expect(await dao.countNayVotes(proposalId)).toEqual(1);
+
+      response = await dao.vote(randomAddress(), 10, proposalId, false);
+      expect(response.type).toBe("failed");
+      expect(await dao.countNayVotes(proposalId)).toEqual(1);
+    });
+
+    it("votes for non-existing proposal", async () => {
+      let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
+      const response = await dao.vote(randomAddress(), 10, 2, true);
+      expect(response.type).toEqual("failed");
+      expect(response.exit_code).toEqual(DICT_ERROR);
+    });
   });
 });

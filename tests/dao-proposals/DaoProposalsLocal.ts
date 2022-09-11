@@ -18,8 +18,11 @@ import {
   serializeDaoProposalsState,
   serializeIEvent,
   serializeProof,
+  unserializeDaoProposalsState,
 } from "./DaoProposals.data";
 import { SbtItemSource } from "../sbt-item/SbtItem.source";
+import BN from "bn.js";
+import { randomAddress } from "../utils/randomAddress";
 
 const cellToBoc = (cell: Cell) => {
   return cell.toBoc({ idx: false }).toString("base64");
@@ -101,5 +104,70 @@ export class DaoProposalsLocal {
         value: toNano(1),
       })
     );
+  }
+
+  async getState(): Promise<DaoProposalsState> {
+    const state = await this.contract.invokeGetMethod("storage_get_state", []);
+    if (state.type === "failed") {
+      console.log(state);
+      throw new Error("Unable to count votes");
+    }
+
+    const sateSlice = state.result[0] as Slice;
+
+    return unserializeDaoProposalsState(sateSlice);
+  }
+
+  async countYayVotes(poposalId: number): Promise<number> {
+    const vote_count = await this.contract.invokeGetMethod(
+      "storage_count_proposal_yays",
+      [
+        {
+          type: "int",
+          value: poposalId.toString(),
+        },
+      ]
+    );
+    if (vote_count.type === "failed") {
+      console.log(vote_count);
+      throw new Error("Unable to count votes");
+    }
+
+    const count = vote_count.result[0] as BN;
+    return count.toNumber();
+  }
+
+  async vote(
+    owner_address: Address,
+    member_id: number,
+    proposal_id: number,
+    vote: boolean
+  ) {
+    return this.sendWithProof(owner_address, member_id, {
+      kind: "vote",
+      cast_vote: {
+        proposal_id,
+        vote,
+      },
+    });
+  }
+
+  async countNayVotes(poposalId: number): Promise<number> {
+    const vote_count = await this.contract.invokeGetMethod(
+      "storage_count_proposal_nays",
+      [
+        {
+          type: "int",
+          value: poposalId.toString(),
+        },
+      ]
+    );
+    if (vote_count.type === "failed") {
+      console.log(vote_count);
+      throw new Error("Unable to count votes");
+    }
+
+    const count = vote_count.result[0] as BN;
+    return count.toNumber();
   }
 }

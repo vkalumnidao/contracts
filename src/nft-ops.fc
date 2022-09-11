@@ -12,7 +12,6 @@ slice calculate_nft_item_address(int wc, cell state_init) {
 }
 
 slice calculate_nft_item_address_init(int index, cell nft_item_code, slice my_address) method_id {
-  dump_stack();
   var sbt_item_init = calculate_nft_item_state_init(index, nft_item_code, my_address);
   return calculate_nft_item_address(workchain(), sbt_item_init);
 }

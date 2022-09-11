@@ -10,11 +10,12 @@
 ;; remove_member_proposal$0010 candidate_id:uint32 description:Text = Proposal
 ;; generic_proposal$0011 topic:Text description:Text = Proposal
 
-;; cast_yay$0 proposal_id:uint8 = CastVote
-;; cast_nay$1 proposal_id:uint8 = CastVote
+;; cast_nay$0 proposal_id:uint3 = CastVote
+;; cast_yay$1 proposal_id:uint3 = CastVote
 
 ;; state$_ owner_id:unit32 sbt_item_code:^Cell nft_collection_address:MsgAddress proposals:HashMapE 3 ProposalState = State
-;; proposal_state$_ expiration_date:uint64 yay:(HashmapE 32 True) nay:(HashmapE 32 True) body:^Proposal = ProposalState
+;; votes voted:uint256 votes:uint256 = Votes
+;; proposal_state$_ expiration_date:uint64 votes:^Votes body:^Proposal = ProposalState
 
 ;; ievent_create_proposal$0001 expiration_date:uint64 body:^Proposal = IEvent
 ;; ievent_vote$0010 vote:CastVote = IEvent
@@ -31,8 +32,10 @@ const TS_BITS = 64;
 
 const DICT_ERROR = 10;
 const INVALID_ACTION_ERROR = 34;
+const DOUBLE_VOTE_ERROR = 1001;
 
 const OP_CHECK_PROOF = 1;
+const OP_CAST_VOTE = 3;
 
 slice storage_get_state() method_id {
   return get_data().begin_parse();
@@ -53,55 +56,104 @@ cell storage_get_proposals() {
   return proposals;
 }
 
-(int, cell, cell, cell) storage_get_proposal(int proposal_id) {
+(int, cell, cell) storage_get_proposal(int proposal_id) {
   var proposals = storage_get_proposals();
   var (proposal, success) = proposals.udict_get?(PROPOSALS_BITS, proposal_id);
   throw_unless(DICT_ERROR, success);
   var expiration_date = proposal~load_uint(TS_BITS);
-  var yay = proposal~load_dict();
-  var nay = proposal~load_dict();
+  var votes = proposal~load_ref();
   var body = proposal~load_ref();
-  return (expiration_date, yay, nay, body);
+  return (expiration_date, votes, body);
 }
 
-int storage_count_votes(cell votes) {
-  var count = 0;
-  var current_key = 0;
+(int, int) storate_get_votes(cell votes) {
+  var votes_slice = votes.begin_parse();
+  var voted = votes_slice~load_uint(256);
+  var votes_for = votes_slice~load_uint(256);
+  return (voted, votes_for);
+}
 
-  if (votes.dict_empty?()) {
-    return 0;
+int storage_count_votes(cell votes, int vote_for) {
+  var (voted, votes_for) = storate_get_votes(votes);
+
+  var bit_votes = 0;
+  if (vote_for) {
+    bit_votes = voted & votes_for;
+  } else {
+    bit_votes = voted ^ votes_for;
   }
-
-  do {
-    var (current_key, _, success) = votes.udict_get_next?(MEMBER_ID_BITS, current_key);
-    if (success) {
-      count += 1;
-    }
-  } until (success)
+  var count = 0;
+  while(bit_votes) {
+    bit_votes &= (bit_votes - 1);
+    count += 1;
+  }
   return count;
 }
 
 int storage_count_proposal_yays(int proposal_id) method_id {
-  var (_, yay, _, _) = storage_get_proposal(proposal_id);
-  return storage_count_votes(yay);
+  var (_, votes, _) = storage_get_proposal(proposal_id);
+  return storage_count_votes(votes, true);
 }
 
 int storage_count_proposal_nays(int proposal_id) method_id {
-  var (_, _, nay, _) = storage_get_proposal(proposal_id);
-  return storage_count_votes(nay);
+  var (_, votes, _) = storage_get_proposal(proposal_id);
+  return storage_count_votes(votes, false);
 }
 
 int storage_get_proposal_expiration_date(int proposal_id) method_id {
-  var  (date, _, _, _) = storage_get_proposal(proposal_id);
-  return (date);
+  var (date, _, _) = storage_get_proposal(proposal_id);
+  return date;
 }
 
 slice storage_get_proposal_info(int proposal_id) method_id {
-  var  (_, _, _, proposal) = storage_get_proposal(proposal_id);
+  var  (_, _, proposal) = storage_get_proposal(proposal_id);
   return proposal.begin_parse();
 }
 
-(int, slice, cell) check_proof(slice sender_address, slice msg) {
+() storage_set_state(int owner_id, cell sbt_item_code, slice nft_collection_address, cell proposals) impure {
+  set_data(begin_cell()
+    .store_uint(owner_id, MEMBER_ID_BITS)
+    .store_ref(sbt_item_code)
+    .store_slice(nft_collection_address)
+    .store_dict(proposals).end_cell());
+}
+
+() storage_set_proposals(cell proposals) impure {
+  var (owner_id, code, nft, _) = storate_get_dao_state();
+  storage_set_state(owner_id, code, nft, proposals);
+}
+
+() storage_set_proposal(int proposal_id, int expiration_date, cell votes, cell body) impure {
+  var proposals = storage_get_proposals();
+  var tproposal = begin_cell()
+    .store_uint(expiration_date, TS_BITS)
+    .store_ref(votes)
+    .store_ref(body)
+    .end_cell().begin_parse();
+  storage_set_proposals(proposals.udict_set(PROPOSALS_BITS, proposal_id, tproposal));
+}
+
+cell storage_update_votes(int member_id, cell votes, int vote_for) {
+  var (voted, votes_for) = storate_get_votes(votes);
+  var member_vote = 1 << member_id;
+  throw_if(DOUBLE_VOTE_ERROR, member_vote & voted);
+  voted |= member_vote;
+  if (vote_for) {
+    votes_for |= member_vote;
+  }
+  return begin_cell()
+    .store_uint(voted, 256)
+    .store_uint(votes_for, 256)
+    .end_cell();
+}
+
+() storage_cast_vote(int proposal_id, int member_id, int vote) impure {
+  var (expiration_date, votes, body) = storage_get_proposal(proposal_id);
+  storage_set_proposal(proposal_id, expiration_date, storage_update_votes(member_id, votes, vote), body);
+}
+
+
+(int, slice, cell) check_proof(slice sender_address, slice msg) impure {
   var member_id = msg~load_uint(256);
   var owner_address = msg~load_msg_addr();
   var body = msg~load_ref();
@@ -110,6 +162,16 @@ slice storage_get_proposal_info(int proposal_id) method_id {
   ;; this is our check proof, relying on sender_address
   throw_unless(INVALID_ACTION_ERROR, equal_slices(expected_address, sender_address));
   return (member_id, owner_address, body);
+}
+
+() cast_vote(int member_id, slice data) impure {
+  var vote = data~load_uint(1);
+  var proposal_id = data~load_uint(PROPOSALS_BITS);
+  if (vote == 1) {
+    storage_cast_vote(proposal_id, member_id, true);
+  } else {
+    storage_cast_vote(proposal_id, member_id, false);
+  }
 }
 
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
@@ -125,6 +187,11 @@ slice storage_get_proposal_info(int proposal_id) method_id {
   var op_slice = operation_cell.begin_parse();
   var operation = op_slice~load_uint(4);
   if (operation == OP_CHECK_PROOF) {
+    return ();
+  }
+
+  if (operation == OP_CAST_VOTE) {
+    cast_vote(member_id, op_slice);
     return ();
   }
 

@@ -1,3 +1,4 @@
+import BN from "bn.js";
 import {
   Cell,
   Slice,
@@ -54,13 +55,12 @@ const PROPOSAL_ADD_TAG = TLTag(PORPOSAL_TAG_LENGTH, 1);
 const PROPOSAL_REMOVE_TAG = TLTag(PORPOSAL_TAG_LENGTH, 2);
 const PROPOSAL_GENERIC_TAG = TLTag(PORPOSAL_TAG_LENGTH, 3);
 
-type MemberVotes = Map<number, true>;
+type MemberVotes = [Set<MembedId>, Set<MembedId>];
 
 export type ProposalState = {
   proposal: Proposal;
   expiration_date: number;
-  yay: MemberVotes;
-  nay: MemberVotes;
+  votes: MemberVotes;
 };
 
 const PROPOSAL_BITS = 3;
@@ -238,11 +238,16 @@ function unserializeTime(parser: Slice): number {
 }
 
 function serializeMemberVotes(builder: Builder, memberVotes: MemberVotes) {
-  const dictBuilder = beginDict(MEMBER_ID_BITS);
-  memberVotes.forEach((_, key) => {
-    dictBuilder.storeCell(key, new Cell());
+  const voted = new Set([...memberVotes[0], ...memberVotes[1]]);
+  let votedString = new BN(0);
+  voted.forEach((memberId) => {
+    votedString = votedString.or(new BN(2).pow(new BN(memberId)));
   });
-  builder.storeDict(dictBuilder.endDict());
+  let votedForString = new BN(0);
+  memberVotes[1].forEach((memberId) => {
+    votedForString = votedForString.or(new BN(2).pow(new BN(memberId)));
+  });
+  builder.storeUint(votedString, 256).storeUint(votedForString, 256);
 }
 
 function unserializeDict<T>(
@@ -257,15 +262,25 @@ function unserializeDict<T>(
   }
 }
 
-function unserializeMemberVotes(parser: Slice): MemberVotes {
-  const dict = unserializeDict(MEMBER_ID_BITS, parser, () => {
-    return true;
-  });
-  const votes: MemberVotes = new Map();
-  for (let [key, _] of dict) {
-    votes.set(parseInt(key), true);
+function bitStringToMemberIds(bitstring: BN): Set<MembedId> {
+  const indexes = new Set<MembedId>();
+  let offset = 0;
+  while (bitstring.gt(new BN(0))) {
+    let zeros = bitstring.zeroBits();
+    indexes.add(offset + zeros);
+    offset += zeros + 1;
+    bitstring = bitstring.shrn(zeros + 1);
   }
-  return votes;
+  return indexes;
+}
+
+function unserializeMemberVotes(parser: Slice): MemberVotes {
+  const votedString = parser.readUint(256);
+  const votedForString = parser.readUint(256);
+  const allVotes = bitStringToMemberIds(votedString);
+  const votedFor = bitStringToMemberIds(votedForString);
+  const votedAgainst = new Set([...allVotes].filter((v) => !votedFor.has(v)));
+  return [votedAgainst, votedFor];
 }
 
 function serializeProposalState(
@@ -273,8 +288,9 @@ function serializeProposalState(
   proposalState: ProposalState
 ) {
   serializeTime(builder, proposalState.expiration_date);
-  serializeMemberVotes(builder, proposalState.yay);
-  serializeMemberVotes(builder, proposalState.nay);
+  const votes = beginCell();
+  serializeMemberVotes(votes, proposalState.votes);
+  builder.storeRef(votes.endCell());
   const propCell = beginCell();
   serializeProposal(propCell, proposalState.proposal);
   builder.storeRef(propCell.endCell());
@@ -282,13 +298,11 @@ function serializeProposalState(
 
 export function unserializeProposalState(parser: Slice): ProposalState {
   const expiration = unserializeTime(parser);
-  const yay = unserializeMemberVotes(parser);
-  const nay = unserializeMemberVotes(parser);
+  const votes = unserializeMemberVotes(parser.readRef());
   const proposal = unserializeProposal(parser.readRef());
   return {
     expiration_date: expiration,
-    yay,
-    nay,
+    votes,
     proposal,
   };
 }
@@ -331,7 +345,7 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
 }
 
 export function serializeCastVote(builder: Builder, cast: CastVote) {
-  builder.storeBit(!cast.vote);
+  builder.storeBit(cast.vote);
   builder.storeUint(cast.proposal_id, PROPOSAL_BITS);
 }
 
