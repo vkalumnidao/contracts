@@ -26,10 +26,6 @@ import { compileFunc } from "../utils/compileFunc";
 const TON_TRUE = -1;
 const TON_FALSE = 0;
 
-export const cellToBoc = (cell: Cell) => {
-  return cell.toBoc({ idx: false }).toString("base64");
-};
-
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
   proposals: new Map(),
@@ -221,56 +217,9 @@ describe("DAO proposals", () => {
         nft_collection_address: daoCollectionAddress,
       })
     );
-    const membedId = 10;
-    const ownerAddress = randomAddress();
-    const expected_address_t = await dao.contract.invokeGetMethod(
-      "calculate_nft_item_address_init",
-      [
-        {
-          type: "int",
-          value: membedId.toString(),
-        },
-        {
-          type: "cell",
-          value: cellToBoc(sbtItemCode.cell),
-        },
-        {
-          type: "cell_slice",
-          value: cellToBoc(
-            beginCell().storeAddress(daoCollectionAddress).endCell()
-          ),
-        },
-      ]
-    );
-
-    const expected_address = (
-      expected_address_t.result[0] as Slice
-    ).readAddress();
-
-    const bodyCell = beginCell();
-    serializeProof<IEvent>(
-      bodyCell,
-      {
-        body: {
-          kind: "check_proof",
-        },
-        index: 10,
-        owner_address: ownerAddress,
-        with_content: false,
-      },
-      serializeIEvent
-    );
-    let res = await dao.contract.sendInternalMessage(
-      new InternalMessage({
-        to: dao.address,
-        body: new CommonMessageInfo({
-          body: new CellMessage(bodyCell.endCell()),
-        }),
-        bounce: false,
-        from: expected_address,
-        value: toNano(1),
-      })
-    );
-    expect(res.type).toEqual("success");
+    const response = await dao.sendWithProof(randomAddress(), 10, {
+      kind: "check_proof",
+    });
+    expect(response.type).toEqual("success");
   });
 });
