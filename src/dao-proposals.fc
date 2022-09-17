@@ -9,12 +9,14 @@
 ;; add_member_proposal$0001 candidate:Candidate description:Text = Proposal
 ;; remove_member_proposal$0010 candidate_id:uint32 description:Text = Proposal
 ;; generic_proposal$0011 topic:Text description:Text = Proposal
+;; calibration_proposal$0100 = Proposal
 
 ;; cast_nay$0 proposal_id:uint4 = CastVote
 ;; cast_yay$1 proposal_id:uint4 = CastVote
 
-;; state$_ owner_id:unit32 sbt_item_code:^Cell nft_collection_address:MsgAddress proposals:HashMapE 3 ProposalState = State
 ;; votes voted:uint256 votes:uint256 = Votes
+;; active_members init:uint1 votes:uint256 = ActiveMembers
+;; state$_ owner_id:unit32 active_members:^ActiveMembers sbt_item_code:^Cell nft_collection_address:MsgAddress proposals:(HashMapE 3 ProposalState) = State
 ;; proposal_state$_ creator_id:uint32 expiration_date:uint64 votes:^Votes body:^Proposal = ProposalState
 
 ;; ievent_check_proof$0001 expiration_date:uint64 body:^Proposal = IEvent
@@ -37,12 +39,15 @@ const DOUBLE_VOTE_ERROR = 1001;
 const UNKNOWN_PROPOSAL_ERROR = 1002;
 const NOT_ENOUGH_SPACE_FOR_PROPOSALS_ERROR = 1003;
 const NOT_ENOUGH_REFS_GENERIC_PROPOSAL_ERROR = 1004;
-const TOO_MANY_PROPOSALS_FROM_USER = 1005;
-const PROPOSAL_IS_NOT_COMPLETE_YET = 1006;
+const TOO_MANY_PROPOSALS_FROM_USER_ERROR = 1005;
+const PROPOSAL_IS_NOT_COMPLETE_YET_ERROR = 1006;
+const NON_ACTIVE_MEMBER_VOTING = 1007;
+const DAO_NOT_INITED_ERROR = 1008;
 
 const PROPOSAL_TYPE_ADD_MEMBER = 1;
 const PROPOSAL_TYPE_REMOVE_MEMBER = 2;
 const PROPOSAL_TYPE_GENERIC = 3;
+const PROPOSAL_TYPE_CALIBRATION = 4;
 
 const MAX_PROPOSALS_FROM_USER = 1;
 
@@ -55,19 +60,24 @@ slice storage_get_state() method_id {
   return get_data().begin_parse();
 }
 
-(int, cell, slice, cell) storate_get_dao_state() {
+(int, cell, cell, slice, cell) storate_get_dao_state() {
   var state = storage_get_state();
-  return (state~load_uint(MEMBER_ID_BITS), state~load_ref(), state~load_msg_addr(), state~load_dict());
+  return (state~load_uint(MEMBER_ID_BITS), state~load_ref(), state~load_ref(), state~load_msg_addr(), state~load_dict());
 }
 
 int storage_get_owner_id() method_id {
-  var (owner_id, _, _, _) = storate_get_dao_state();
+  var (owner_id, _, _, _, _) = storate_get_dao_state();
   return owner_id;
 }
 
 cell storage_get_proposals() {
-  var (_, _, _, proposals) = storate_get_dao_state();
+  var (_, _, _, _, proposals) = storate_get_dao_state();
   return proposals;
+}
+
+cell storage_get_active_members() {
+  var (_, amembers, _, _, _) = storate_get_dao_state();
+  return amembers;
 }
 
 (int, int, cell, cell) storage_get_proposal(int proposal_id) method_id {
@@ -125,17 +135,18 @@ slice storage_get_proposal_info(int proposal_id) method_id {
   return proposal.begin_parse();
 }
 
-() storage_set_state(int owner_id, cell sbt_item_code, slice nft_collection_address, cell proposals) impure {
+() storage_set_state(int owner_id, cell amembers, cell sbt_item_code, slice nft_collection_address, cell proposals) impure {
   set_data(begin_cell()
     .store_uint(owner_id, MEMBER_ID_BITS)
+    .store_ref(amembers)
     .store_ref(sbt_item_code)
     .store_slice(nft_collection_address)
     .store_dict(proposals).end_cell());
 }
 
 () storage_set_proposals(cell proposals) impure {
-  var (owner_id, code, nft, _) = storate_get_dao_state();
-  storage_set_state(owner_id, code, nft, proposals);
+  var (owner_id, amembers, code, nft, _) = storate_get_dao_state();
+  storage_set_state(owner_id, amembers, code, nft, proposals);
 }
 
 () storage_set_proposal(int proposal_id, int member_id, int expiration_date, cell votes, cell body) impure {
@@ -149,7 +160,28 @@ slice storage_get_proposal_info(int proposal_id) method_id {
   storage_set_proposals(proposals.udict_set(PROPOSALS_BITS, proposal_id, tproposal));
 }
 
-cell storage_update_votes(int member_id, cell votes, int vote_for) {
+[int, int] parse_active_members(cell active_members) {
+  var voted_slice = active_members.begin_parse();
+  var init = voted_slice~load_uint(1);
+  var voted = voted_slice~load_uint(256);
+  return [init, voted];
+}
+
+int is_active_members(cell active_members, int member_id) {
+  var [init, voted] = parse_active_members(active_members);
+  throw_unless(DAO_NOT_INITED_ERROR, init);
+  return voted & (1 << member_id);
+}
+
+int storage_is_dao_inited() {
+  var am = storage_get_active_members();
+  var [init, _] = parse_active_members(am);
+  return init;
+}
+
+cell update_votes(int member_id, cell votes, int vote_for) {
+  var amembers = storage_get_active_members();
+  throw_unless(NON_ACTIVE_MEMBER_VOTING, is_active_members(amembers, member_id));
   var (voted, votes_for) = storage_get_votes(votes);
   var member_vote = 1 << member_id;
   throw_if(DOUBLE_VOTE_ERROR, member_vote & voted);
@@ -165,14 +197,14 @@ cell storage_update_votes(int member_id, cell votes, int vote_for) {
 
 () storage_cast_vote(int proposal_id, int member_id, int vote) impure {
   var (creator_id, expiration_date, votes, body) = storage_get_proposal(proposal_id);
-  storage_set_proposal(proposal_id, creator_id, expiration_date, storage_update_votes(member_id, votes, vote), body);
+  storage_set_proposal(proposal_id, creator_id, expiration_date, update_votes(member_id, votes, vote), body);
 }
 
 (int, slice, cell) check_proof(slice sender_address, slice msg) impure {
   var member_id = msg~load_uint(256);
   var owner_address = msg~load_msg_addr();
   var body = msg~load_ref();
-  var (_, sbt_item_code, nft_collection_address, _) = storate_get_dao_state();
+  var (_, _, sbt_item_code, nft_collection_address, _) = storate_get_dao_state();
   var expected_address = calculate_nft_item_address_init(member_id, sbt_item_code, nft_collection_address);
   ;; this is our check proof, relying on sender_address
   throw_unless(INVALID_ACTION_ERROR, equal_slices(expected_address, sender_address));
@@ -189,66 +221,82 @@ cell storage_update_votes(int member_id, cell votes, int vote_for) {
   }
 }
 
-cell parse_text(slice data) {
-  return data~load_ref();
+(slice, cell) parse_text(slice data) {
+  var text = data~load_ref();
+  return (data, text);
 }
 
-[int, slice, cell] parse_candidate(data) {
+(slice, [int, slice, cell]) parse_candidate(data) {
   var tg_id = data~load_uint(32);
   var address = data~load_msg_addr();
-  var bio = parse_text(data);
-  return [tg_id, address, bio];
+  var bio = data~parse_text();
+  return (data, [tg_id, address, bio]);
 }
 
-([int, slice, cell], cell) parse_add_member_proposal(slice data) impure {
-  var candidate = parse_candidate(data);
-  var text = parse_text(data);
-  return (candidate, text);
+(slice, [[int, slice, cell], cell]) parse_add_member_proposal(slice data) impure {
+  var candidate = data~parse_candidate();
+  var text = data~parse_text();
+  return (data, [candidate, text]);
 }
 
-[int, cell] parse_remove_member_proposal(slice data) impure {
+(slice, [int, cell]) parse_remove_member_proposal(slice data) impure {
   var member_id = data~load_uint(32);
-  var description = parse_text(data);
-  return [member_id, description];
+  var description = data~parse_text();
+  return (data, [member_id, description]);
 }
 
-int parse_proposal_type(slice data) impure {
+(slice, int) parse_proposal_type(slice data) impure {
   var tp = data~load_uint(4);
   if (tp == PROPOSAL_TYPE_ADD_MEMBER) {
-    return tp;
+    return (data, tp);
   }
 
   if (tp == PROPOSAL_TYPE_REMOVE_MEMBER) {
-    return tp;
+    return (data, tp);
   }
   if (tp == PROPOSAL_TYPE_GENERIC) {
-    return tp;
+    return (data, tp);
+  }
+  if (tp == PROPOSAL_TYPE_CALIBRATION) {
+    return (data, tp);
   }
   throw(UNKNOWN_PROPOSAL_ERROR);
-  return 0;
+  return (data, 0);
 }
 
-[cell, cell] parse_generic_proposal(slice data) impure {
+(slice, [cell, cell]) parse_generic_proposal(slice data) impure {
   throw_unless(NOT_ENOUGH_REFS_GENERIC_PROPOSAL_ERROR, data.slice_refs() == 2);
-  var topic = parse_text(data);
-  var description = parse_text(data);
-  return [topic, description];
+  var topic = data~parse_text();
+  var description = data~parse_text();
+  return (data, [topic, description]);
 }
 
 () validate_proposal(slice data) impure {
-  var tp = parse_proposal_type(data);
+  var tp = data~parse_proposal_type();
+  var validated = false;
   if (tp == PROPOSAL_TYPE_ADD_MEMBER) {
-    ;; should we check for duplicates?
-    parse_add_member_proposal(data);
+    ;; TODO: should we check for duplicates?
+    data~parse_add_member_proposal();
+    validated = true;
   }
 
   if (tp == PROPOSAL_TYPE_REMOVE_MEMBER) {
-    ;; should we check that person exists?
-    parse_remove_member_proposal(data);
+    ;; TODO: should we check that person exists?
+    data~parse_remove_member_proposal();
+    validated = true;
   }
 
   if (tp == PROPOSAL_TYPE_GENERIC) {
-    parse_generic_proposal(data);
+    data~parse_generic_proposal();
+    validated = true;
+  }
+  if (tp == PROPOSAL_TYPE_CALIBRATION) {
+    ;; TODO: we should limit frequency of calibration votes
+    validated = true;
+  }
+  data.end_parse();
+  if (validated == false) {
+    throw(UNKNOWN_PROPOSAL_ERROR);
   }
 }
 
@@ -288,6 +336,15 @@ int select_new_proposal_id() method_id {
   return -1;
 }
 
+() storage_set_active_members(int voted) impure {
+  var new_active_members = begin_cell()
+    .store_uint(1, 1)
+    .store_uint(voted, 256)
+    .end_cell();
+  var (owner_id, _, code, nft, proposals) = storate_get_dao_state();
+  storage_set_state(owner_id, new_active_members, code, nft, proposals);
+}
+
 int storage_count_user_proposals(int member_id) {
   var proposals = storage_get_proposals();
   var count = 0;
@@ -304,12 +361,18 @@ int storage_count_user_proposals(int member_id) {
   return count;
 }
 
+() calibrate_dao_members(cell votes) impure {
+  var (voted, _) = storage_get_votes(votes);
+  storage_set_active_members(voted);
+}
+
 () create_proposal(int member_id, slice data) impure {
+  throw_unless(DAO_NOT_INITED_ERROR, storage_is_dao_inited());
   var expiration_date = data~load_uint(TS_BITS);
   var body = data~load_ref();
   validate_proposal(body.begin_parse());
   var proposal_id = select_new_proposal_id();
-  throw_if(TOO_MANY_PROPOSALS_FROM_USER, storage_count_user_proposals(member_id) >= MAX_PROPOSALS_FROM_USER);
+  throw_if(TOO_MANY_PROPOSALS_FROM_USER_ERROR, storage_count_user_proposals(member_id) >= MAX_PROPOSALS_FROM_USER);
   storage_set_proposal(proposal_id, member_id, expiration_date, create_votes_storage(), body);
 }
 
@@ -317,9 +380,16 @@ int storage_count_user_proposals(int member_id) {
   var proposal_id = data~load_uint(PROPOSALS_BITS);
   var (creator_id, expiration_date, votes, body) = storage_get_proposal(proposal_id);
   var time = now();
-  throw_if(PROPOSAL_IS_NOT_COMPLETE_YET, time < expiration_date);
-  ;; TODO: how to track current dao members, if sbt item is destroyed we have no way of knowing
-  ;; we can store counter, but it won't account of destroyed sbt items (by user or system)
+  throw_if(PROPOSAL_IS_NOT_COMPLETE_YET_ERROR, time < expiration_date);
+  var proposal = body.begin_parse();
+  var tp = proposal~parse_proposal_type();
+  if (tp == PROPOSAL_TYPE_CALIBRATION) {
+    calibrate_dao_members(votes);
+  }
+  var proposals = storage_get_proposals();
+  var success = proposals~udict_delete?(PROPOSALS_BITS, proposal_id);
+  throw_unless(DICT_ERROR, success);
+  storage_set_proposals(proposals);
 }
 
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {

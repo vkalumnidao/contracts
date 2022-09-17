@@ -50,11 +50,18 @@ function TLTag(length: number, value: number): BitString {
   return bit;
 }
 
-export type Proposal = ProposalAdd | ProposalGeneric | ProposalRemove;
+export type Proposal =
+  | ProposalAdd
+  | ProposalGeneric
+  | ProposalRemove
+  | { kind: "calibration" };
 const PORPOSAL_TAG_LENGTH = 4;
-const PROPOSAL_ADD_TAG = TLTag(PORPOSAL_TAG_LENGTH, 1);
-const PROPOSAL_REMOVE_TAG = TLTag(PORPOSAL_TAG_LENGTH, 2);
-const PROPOSAL_GENERIC_TAG = TLTag(PORPOSAL_TAG_LENGTH, 3);
+const PROPOSAL_TAGS: Record<Proposal["kind"], BitString> = {
+  add: TLTag(PORPOSAL_TAG_LENGTH, 1),
+  remove: TLTag(PORPOSAL_TAG_LENGTH, 2),
+  generic: TLTag(PORPOSAL_TAG_LENGTH, 3),
+  calibration: TLTag(PORPOSAL_TAG_LENGTH, 4),
+};
 
 type MemberVotes = [Set<MembedId>, Set<MembedId>];
 
@@ -65,10 +72,16 @@ export type ProposalState = {
   votes: MemberVotes;
 };
 
+type ActiveMembers = {
+  voted: Set<MembedId>;
+  init: boolean;
+};
+
 const PROPOSAL_BITS = 4;
 export type DaoProposalsState = {
   owner_id: number;
   sbt_item_code: Cell;
+  active_members: ActiveMembers;
   nft_collection_address: string;
   proposals: Map<number, ProposalState>;
 };
@@ -226,18 +239,19 @@ function unserializeProposalGeneric(parser: Slice): ProposalGeneric {
 }
 
 function serializeProposal(builder: Builder, proposal: Proposal) {
+  const tag = PROPOSAL_TAGS[proposal.kind];
+  builder.storeBitString(tag);
   switch (proposal.kind) {
     case "add":
-      builder.storeBitString(PROPOSAL_ADD_TAG);
       serializeProposalAdd(builder, proposal);
       break;
     case "remove":
-      builder.storeBitString(PROPOSAL_REMOVE_TAG);
       serializeProposalRemove(builder, proposal);
       break;
     case "generic":
-      builder.storeBitString(PROPOSAL_GENERIC_TAG);
       serializeProposalGeneric(builder, proposal);
+      break;
+    case "calibration":
       break;
     default:
       never(proposal, "Unexpected proposal type: " + proposal);
@@ -247,20 +261,23 @@ function serializeProposal(builder: Builder, proposal: Proposal) {
 export function unserializeProposal(parser: Slice): Proposal {
   const tag = parser.readBitString(PORPOSAL_TAG_LENGTH);
   // equals method doesnt work, because for some reason readBitString create bitstring of 1023 length
-  if (tag.toString() === PROPOSAL_ADD_TAG.toString()) {
+  if (tag.toString() === PROPOSAL_TAGS["add"].toString()) {
     return unserializeProposalAdd(parser);
   }
-  if (tag.toString() === PROPOSAL_REMOVE_TAG.toString()) {
+  if (tag.toString() === PROPOSAL_TAGS["remove"].toString()) {
     return unserializeProposalRemove(parser);
   }
-  if (tag.toString() === PROPOSAL_GENERIC_TAG.toString()) {
+  if (tag.toString() === PROPOSAL_TAGS["generic"].toString()) {
     return unserializeProposalGeneric(parser);
+  }
+  if (tag.toString() === PROPOSAL_TAGS["calibration"].toString()) {
+    return { kind: "calibration" };
   }
   throw new Error("Unknonw proposal type tag: " + tag.toString());
 }
 
 function serializeTime(builder: Builder, ts: number) {
-  builder.storeUint(Math.ceil(ts / 1000), 64);
+  builder.storeUint(ts, 64);
 }
 
 function unserializeTime(parser: Slice): number {
@@ -340,6 +357,22 @@ export function unserializeProposalState(parser: Slice): ProposalState {
   };
 }
 
+function serializeActiveMembers(builder: Builder, am: ActiveMembers) {
+  builder.storeBit(am.init);
+  let mask = new BN(0);
+  am.voted.forEach((i, index) => {
+    mask = mask.or(new BN(1).shln(index));
+  });
+  builder.storeUint(mask, 256);
+}
+
+function unserializeActiveMembers(parser: Slice): ActiveMembers {
+  const init = parser.readBit();
+  const mask = parser.readUint(256);
+  const memberIds = bitStringToMemberIds(mask);
+  return { voted: memberIds, init };
+}
+
 export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
   const dict = beginDict(PROPOSAL_BITS);
   state.proposals.forEach((proposal, id) => {
@@ -347,8 +380,12 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
     serializeProposalState(builder, proposal);
     dict.storeCell(id, builder.endCell());
   });
+
+  const am = beginCell();
+  serializeActiveMembers(am, state.active_members);
   const builder = beginCell()
     .storeUint(state.owner_id, MEMBER_ID_BITS)
+    .storeRef(am.endCell())
     .storeRef(state.sbt_item_code);
   serializeAddress(builder, state.nft_collection_address);
   return builder.storeDict(dict.endDict()).endCell();
@@ -356,6 +393,9 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
 
 export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   const owner = parser.readUintNumber(MEMBER_ID_BITS);
+  const activeMembers = unserializeActiveMembers(
+    parser.readCell().beginParse()
+  );
   const code = parser.readCell();
   const address = unserializeAddress(parser);
   const proposalsStr = unserializeDict(PROPOSAL_BITS, parser, (slice) => {
@@ -368,6 +408,7 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   return {
     owner_id: owner,
     proposals,
+    active_members: activeMembers,
     nft_collection_address: address,
     sbt_item_code: code,
   };

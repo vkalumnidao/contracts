@@ -35,25 +35,39 @@ const DOUBLE_VOTE_ERROR = 1001;
 const UNKNOWN_PROPOSAL_ERROR = 1002;
 const NOT_ENOUGH_SPACE_FOR_PROPOSALS_ERROR = 1003;
 const NOT_ENOUGH_REFS_GENERIC_PROPOSAL_ERROR = 1004;
-const TOO_MANY_PROPOSALS_FROM_USER = 1005;
-const PROPOSAL_IS_NOT_COMPLETE_YET = 1006;
+const TOO_MANY_PROPOSALS_FROM_USER_ERROR = 1005;
+const PROPOSAL_IS_NOT_COMPLETE_YET_ERROR = 1006;
+const NON_ACTIVE_MEMBER_VOTING = 1007;
+const DAO_NOT_INITED_ERROR = 1008;
 
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
   proposals: new Map(),
+  active_members: {
+    init: false,
+    voted: new Set(),
+  },
   sbt_item_code: new Cell(),
   nft_collection_address: randomAddress().toString(),
 };
 
+function nowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
 const fullConfig: DaoProposalsState = {
   owner_id: 1,
   sbt_item_code: new Cell(),
+  active_members: {
+    init: true,
+    voted: new Set([0, 1, 2]),
+  },
   nft_collection_address: randomAddress().toString(),
   proposals: new Map([
     [
       0,
       {
-        expiration_date: Date.now(),
+        expiration_date: nowSeconds(),
         creator_id: 1,
         votes: [new Set(), new Set([1])],
         proposal: {
@@ -151,12 +165,11 @@ describe("DAO proposals", () => {
   });
 
   it("returns owner_id correctly", async () => {
-    let dao = await DaoProposalsLocal.createFromConfig({
-      owner_id: 10,
-      proposals: new Map(),
-      sbt_item_code: new Cell(),
-      nft_collection_address: randomAddress().toString(),
-    });
+    let dao = await DaoProposalsLocal.createFromConfig(
+      await getState({
+        owner_id: 10,
+      })
+    );
     const result = await dao.contract.invokeGetMethod(
       "storage_get_owner_id",
       []
@@ -244,16 +257,23 @@ describe("DAO proposals", () => {
   describe("|voting", () => {
     it("votes for existing proposal", async () => {
       const proposalId = 0;
-      let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
+      let dao = await DaoProposalsLocal.createFromConfig(
+        await getState({
+          active_members: {
+            init: true,
+            voted: new Set([10, 11]),
+          },
+        })
+      );
 
       // check voting for
       let response = await dao.vote(randomAddress(), 10, proposalId, true);
-      expect(response.type).toEqual("success");
+      expectSucess(response);
       expect(await dao.countYayVotes(proposalId)).toEqual(2);
 
       // check voting against
       response = await dao.vote(randomAddress(), 11, proposalId, false);
-      expect(response.type).toBe("success");
+      expectSucess(response);
       expect(await dao.countNayVotes(proposalId)).toEqual(1);
 
       // check double votes
@@ -261,6 +281,11 @@ describe("DAO proposals", () => {
       expect(response.type).toEqual("failed");
       expect(response.exit_code).toEqual(DOUBLE_VOTE_ERROR);
       expect(await dao.countNayVotes(proposalId)).toEqual(1);
+
+      // check member voting not part of calibration vote
+      response = await dao.vote(randomAddress(), 12, proposalId, false);
+      expect(response.type).toEqual("failed");
+      expect(response.exit_code).toEqual(NON_ACTIVE_MEMBER_VOTING);
     });
 
     it("votes for non-existing proposal", async () => {
@@ -282,7 +307,7 @@ describe("DAO proposals", () => {
     };
 
     const removeProposalState: ProposalState = {
-      expiration_date: Date.now(),
+      expiration_date: nowSeconds(),
       creator_id: 10,
       proposal: removeProposal,
       votes: [new Set(), new Set()],
@@ -361,6 +386,33 @@ describe("DAO proposals", () => {
   });
 
   describe("|create proposals", () => {
+    it("creates proposal before first calibration vote", async () => {
+      const removeProposal: ProposalRemove = {
+        kind: "remove",
+        candidate_id: 1,
+        description: {
+          text: "1",
+          length: 1,
+        },
+      };
+      let dao = await DaoProposalsLocal.createFromConfig(
+        await getState({
+          proposals: new Map(),
+          active_members: {
+            init: false,
+            voted: new Set(),
+          },
+        })
+      );
+      const result = await dao.createProposal(
+        randomAddress(),
+        10,
+        nowSeconds(),
+        removeProposal
+      );
+      expect(result.type).toEqual("failed");
+      expect(result.exit_code).toEqual(DAO_NOT_INITED_ERROR);
+    });
     it("creates add member proposal", async () => {
       const addProposal: ProposalAdd = {
         kind: "add",
@@ -382,11 +434,11 @@ describe("DAO proposals", () => {
           proposals: new Map(),
         })
       );
-      const expiration = Date.now();
+      const expiration = nowSeconds();
       const result = await dao.createProposal(
         randomAddress(),
         10,
-        Date.now(),
+        nowSeconds(),
         addProposal
       );
       expectSucess(result);
@@ -396,20 +448,25 @@ describe("DAO proposals", () => {
 
     it("tries to create invalid add member proposal and fails", async () => {
       let dao = await DaoProposalsLocal.createFromConfig(await getState({}));
-      const result = await dao.createProposal(randomAddress(), 10, Date.now(), {
-        kind: "add",
-        description: {
-          text: "1",
-          length: 1,
-        },
-        candidate: {
-          bio: {
+      const result = await dao.createProposal(
+        randomAddress(),
+        10,
+        nowSeconds(),
+        {
+          kind: "add",
+          description: {
+            text: "1",
             length: 1,
-            text: "test",
           },
-          id: 100,
-        },
-      } as any);
+          candidate: {
+            bio: {
+              length: 1,
+              text: "test",
+            },
+            id: 100,
+          },
+        } as any
+      );
       expect(result.type).toEqual("failed");
     });
 
@@ -430,7 +487,7 @@ describe("DAO proposals", () => {
       const result = await dao.createProposal(
         randomAddress(),
         10,
-        Date.now(),
+        nowSeconds(),
         removeProposal
       );
       expectSucess(result);
@@ -451,7 +508,7 @@ describe("DAO proposals", () => {
       const result = await dao.createProposal(
         randomAddress(),
         10,
-        Date.now(),
+        nowSeconds(),
         removeProposal
       );
       expect(result.type).toEqual("failed");
@@ -477,7 +534,7 @@ describe("DAO proposals", () => {
       const result = await dao.createProposal(
         randomAddress(),
         10,
-        Date.now(),
+        nowSeconds(),
         genericProposal
       );
 
@@ -502,7 +559,7 @@ describe("DAO proposals", () => {
       const result = await dao.createProposal(
         randomAddress(),
         10,
-        Date.now(),
+        nowSeconds(),
         genericProposal
       );
       expect(result.type).toEqual("failed");
@@ -523,7 +580,7 @@ describe("DAO proposals", () => {
             [
               0,
               {
-                expiration_date: Date.now(),
+                expiration_date: nowSeconds(),
                 creator_id: 1,
                 proposal: removeProposal,
                 votes: [new Set(), new Set()],
@@ -535,11 +592,31 @@ describe("DAO proposals", () => {
       const result = await dao.createProposal(
         randomAddress(),
         1,
-        Date.now(),
+        nowSeconds(),
         removeProposal
       );
       expect(result.type).toEqual("failed");
-      expect(result.exit_code).toEqual(TOO_MANY_PROPOSALS_FROM_USER);
+      expect(result.exit_code).toEqual(TOO_MANY_PROPOSALS_FROM_USER_ERROR);
+    });
+
+    it("creates calibration proposal", async () => {
+      const expdate = nowSeconds();
+      let dao = await DaoProposalsLocal.createFromConfig(
+        await getState({
+          proposals: new Map([]),
+        })
+      );
+      let result = await dao.createProposal(randomAddress(), 1, expdate, {
+        kind: "calibration",
+      });
+      expectSucess(result);
+      const proposal = await dao.getProposal(0);
+      expect(proposal).toEqual({
+        expiration_date: expdate,
+        creator_id: 1,
+        proposal: { kind: "calibration" },
+        votes: [new Set(), new Set()],
+      });
     });
   });
 
@@ -566,7 +643,7 @@ describe("DAO proposals", () => {
               0,
               {
                 creator_id: 1,
-                expiration_date: Date.now() + 1000 * 60 * 60 * 24,
+                expiration_date: nowSeconds() + 60 * 60 * 24,
                 proposal: {
                   kind: "remove",
                   candidate_id: 1,
@@ -586,35 +663,26 @@ describe("DAO proposals", () => {
         proposal_id: 0,
       });
       expect(result.type).toEqual("failed");
-      expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET);
+      expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET_ERROR);
     });
-    describe.only("add members proposal", () => {
-      it("checks success condition", async () => {
-        const candidateAddress = randomAddress();
+    describe("calibration proposal", () => {
+      it.only("performs calibration", async () => {
         const dao = await DaoProposalsLocal.createFromConfig(
           await getState({
+            active_members: {
+              init: false,
+              voted: new Set(),
+            },
             proposals: new Map([
               [
                 0,
                 {
                   creator_id: 1,
-                  expiration_date: Date.now() - 1000 * 1000,
+                  expiration_date: nowSeconds() - 100,
                   proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
-                      id: 100,
-                    },
+                    kind: "calibration",
                   },
-                  votes: [new Set(), new Set([1])],
+                  votes: [new Set([0, 1, 2, 4, 5, 6]), new Set([7, 8, 9])],
                 },
               ],
             ]),
