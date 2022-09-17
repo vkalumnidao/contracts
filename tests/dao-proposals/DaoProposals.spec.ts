@@ -666,7 +666,7 @@ describe("DAO proposals", () => {
       expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET_ERROR);
     });
     describe("calibration proposal", () => {
-      it.only("performs calibration", async () => {
+      it("performs calibration", async () => {
         const dao = await DaoProposalsLocal.createFromConfig(
           await getState({
             active_members: {
@@ -692,8 +692,219 @@ describe("DAO proposals", () => {
           kind: "execute_decision",
           proposal_id: 0,
         });
-        expect(result.type).toEqual("failed");
-        expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET);
+        expectSucess(result);
+        let state = await dao.getState();
+        expect(state.active_members).toEqual({
+          init: true,
+          voted: new Set([0, 1, 2, 4, 5, 6, 7, 8, 9]),
+        });
+        expect(state.proposals.size).toEqual(0);
+      });
+    });
+    describe.only("add members proposal", () => {
+      it("nobody votes — do not add", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set(), new Set()],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        expect(result.actionList).toEqual([]);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
+      });
+
+      it("not enough votes — do not add", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set(), new Set([1])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        expect(result.actionList).toEqual([]);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
+      });
+
+      it("equal votes — do not add", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set([0]), new Set([1])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        expect(result.actionList).toEqual([]);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
+      });
+
+      it("minority votes — do not add", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set([0, 1, 2, 3]), new Set([4, 5, 6])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        expect(result.actionList).toEqual([]);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
+      });
+
+      it("majority votes — do add", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set([0, 1, 2, 3]), new Set([4, 5, 6])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        expect(result.actionList).toEqual([]);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
       });
     });
   });

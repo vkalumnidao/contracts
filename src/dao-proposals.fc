@@ -376,6 +376,17 @@ int storage_count_user_proposals(int member_id) {
   storage_set_proposal(proposal_id, member_id, expiration_date, create_votes_storage(), body);
 }
 
+() add_dao_member(int creator_id, cell votes, slice add_proposal) {
+  var yays = storage_count_votes(votes, true);
+  var nays = storage_count_votes(votes, false);
+  if ((yays <= nays) | (yays < 2)) {
+    ;; vote is not successful
+    return ();
+  }
+  ;; TODO: add to active members right away
+  ;; var [[tg_id, address, bio], text] = add_proposal~parse_add_member_proposal();
+}
+
 () execute_decision(int member_id, slice data) impure {
   var proposal_id = data~load_uint(PROPOSALS_BITS);
   var (creator_id, expiration_date, votes, body) = storage_get_proposal(proposal_id);
@@ -385,6 +396,9 @@ int storage_count_user_proposals(int member_id) {
   var tp = proposal~parse_proposal_type();
   if (tp == PROPOSAL_TYPE_CALIBRATION) {
     calibrate_dao_members(votes);
+  }
+  if (tp == PROPOSAL_TYPE_ADD_MEMBER) {
+    add_dao_member(creator_id, votes, proposal);
   }
   var proposals = storage_get_proposals();
   var success = proposals~udict_delete?(PROPOSALS_BITS, proposal_id);
