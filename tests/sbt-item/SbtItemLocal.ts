@@ -10,7 +10,13 @@ import {
   toNano,
 } from "ton";
 import BN from "bn.js";
-import { buildSbtItemDataCell, SbtItemData, Queries } from "./SbtItem.data";
+import {
+  buildSbtItemDataCell,
+  buildSingleSbtDataCell,
+  SbtItemData,
+  SbtSingleData,
+  Queries,
+} from "./SbtItem.data";
 import { SbtItemSource } from "./SbtItem.source";
 import { decodeOffChainContent } from "../utils/nftContent";
 import { compileFunc } from "../utils/compileFunc";
@@ -21,7 +27,7 @@ type NftDataResponse =
       isInitialized: true;
       index: number;
       collectionAddress: Address | null;
-      ownerAddress: Address;
+      ownerAddress: Address | null;
       content: string;
       contentRaw: Cell;
     };
@@ -72,26 +78,15 @@ export class SbtItemLocal {
     };
   }
 
-  async getNonce(): Promise<BN> {
-    let res = await this.contract.invokeGetMethod("get_nonce", []);
+  async getAuthority(): Promise<Address | null> {
+    let res = await this.contract.invokeGetMethod("get_authority_address", []);
     if (res.type !== "success") {
-      throw new Error(`Cant invoke get_nonce`);
+      throw new Error(`Cant invoke get_authority_address`);
     }
 
-    let [n] = res.result as [BN];
+    let [key] = res.result as [Slice];
 
-    return n;
-  }
-
-  async getPubKey(): Promise<BN> {
-    let res = await this.contract.invokeGetMethod("get_public_key", []);
-    if (res.type !== "success") {
-      throw new Error(`Cant invoke get_public_key`);
-    }
-
-    let [key] = res.result as [BN];
-
-    return key;
+    return key.readAddress();
   }
 
   async getEditor(): Promise<Address | null> {

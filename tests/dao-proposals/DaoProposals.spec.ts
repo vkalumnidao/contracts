@@ -701,7 +701,7 @@ describe("DAO proposals", () => {
         expect(state.proposals.size).toEqual(0);
       });
     });
-    describe.only("add members proposal", () => {
+    describe("add members proposal", () => {
       it("nobody votes — do not add", async () => {
         const candidateAddress = randomAddress();
         const dao = await DaoProposalsLocal.createFromConfig(
