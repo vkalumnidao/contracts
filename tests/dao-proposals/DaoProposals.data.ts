@@ -83,6 +83,7 @@ const IEVENT_TAGS: Record<IEvent["kind"], BitString> = {
   check_proof: TLTag(IEVENT_TAG_LENGTH, 1),
   create_proposal: TLTag(IEVENT_TAG_LENGTH, 2),
   vote: TLTag(IEVENT_TAG_LENGTH, 3),
+  execute_decision: TLTag(IEVENT_TAG_LENGTH, 4),
 };
 
 export type IEventCreateProposal = {
@@ -96,10 +97,16 @@ export type IEventVote = {
   cast_vote: CastVote;
 };
 
+export type IEventExecutDecision = {
+  kind: "execute_decision";
+  proposal_id: number;
+};
+
 export type IEvent =
   | IEventCreateProposal
   | IEventVote
-  | { kind: "check_proof" };
+  | { kind: "check_proof" }
+  | IEventExecutDecision;
 
 type Proof<T> = {
   index: number;
@@ -253,7 +260,7 @@ export function unserializeProposal(parser: Slice): Proposal {
 }
 
 function serializeTime(builder: Builder, ts: number) {
-  builder.storeUint(ts, 64);
+  builder.storeUint(Math.ceil(ts / 1000), 64);
 }
 
 function unserializeTime(parser: Slice): number {
@@ -386,6 +393,9 @@ export function serializeIEvent(builder: Builder, event: IEvent) {
       break;
     case "vote":
       serializeCastVote(builder, event.cast_vote);
+      break;
+    case "execute_decision":
+      builder.storeUint(event.proposal_id, PROPOSAL_BITS);
       break;
     case "check_proof":
       builder.storeRef(new Cell());

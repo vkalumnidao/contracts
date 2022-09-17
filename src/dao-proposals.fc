@@ -10,8 +10,8 @@
 ;; remove_member_proposal$0010 candidate_id:uint32 description:Text = Proposal
 ;; generic_proposal$0011 topic:Text description:Text = Proposal
 
-;; cast_nay$0 proposal_id:uint3 = CastVote
-;; cast_yay$1 proposal_id:uint3 = CastVote
+;; cast_nay$0 proposal_id:uint4 = CastVote
+;; cast_yay$1 proposal_id:uint4 = CastVote
 
 ;; state$_ owner_id:unit32 sbt_item_code:^Cell nft_collection_address:MsgAddress proposals:HashMapE 3 ProposalState = State
 ;; votes voted:uint256 votes:uint256 = Votes
@@ -20,6 +20,7 @@
 ;; ievent_check_proof$0001 expiration_date:uint64 body:^Proposal = IEvent
 ;; ievent_create_proposal$0010 expiration_date:uint64 body:^Proposal = IEvent
 ;; ievent_vote$0011 vote:CastVote = IEvent
+;; ievent_execute_decision$0100 proposal_id:uin4 = IEvent
 ;; event$_ body:(Proof IEvent) = Event
 
 
@@ -37,6 +38,7 @@ const UNKNOWN_PROPOSAL_ERROR = 1002;
 const NOT_ENOUGH_SPACE_FOR_PROPOSALS_ERROR = 1003;
 const NOT_ENOUGH_REFS_GENERIC_PROPOSAL_ERROR = 1004;
 const TOO_MANY_PROPOSALS_FROM_USER = 1005;
+const PROPOSAL_IS_NOT_COMPLETE_YET = 1006;
 
 const PROPOSAL_TYPE_ADD_MEMBER = 1;
 const PROPOSAL_TYPE_REMOVE_MEMBER = 2;
@@ -47,6 +49,7 @@ const MAX_PROPOSALS_FROM_USER = 1;
 const OP_CHECK_PROOF = 1;
 const OP_CREATE_PROPOSAL = 2;
 const OP_CAST_VOTE = 3;
+const OP_EXECUTE_DECISION = 4;
 
 slice storage_get_state() method_id {
   return get_data().begin_parse();
@@ -310,6 +313,15 @@ int storage_count_user_proposals(int member_id) {
   storage_set_proposal(proposal_id, member_id, expiration_date, create_votes_storage(), body);
 }
 
+() execute_decision(int member_id, slice data) impure {
+  var proposal_id = data~load_uint(PROPOSALS_BITS);
+  var (creator_id, expiration_date, votes, body) = storage_get_proposal(proposal_id);
+  var time = now();
+  throw_if(PROPOSAL_IS_NOT_COMPLETE_YET, time < expiration_date);
+  ;; TODO: how to track current dao members, if sbt item is destroyed we have no way of knowing
+  ;; we can store counter, but it won't account of destroyed sbt items (by user or system)
+}
+
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
   if (in_msg_body.slice_empty?()) { ;; ignore empty messages
     return ();
@@ -333,6 +345,11 @@ int storage_count_user_proposals(int member_id) {
 
   if (operation == OP_CREATE_PROPOSAL) {
     create_proposal(member_id, op_slice);
+    return ();
+  }
+
+  if (operation == OP_EXECUTE_DECISION) {
+    execute_decision(member_id, op_slice);
     return ();
   }
 

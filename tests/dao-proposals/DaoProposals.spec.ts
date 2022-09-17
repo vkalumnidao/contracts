@@ -36,6 +36,7 @@ const UNKNOWN_PROPOSAL_ERROR = 1002;
 const NOT_ENOUGH_SPACE_FOR_PROPOSALS_ERROR = 1003;
 const NOT_ENOUGH_REFS_GENERIC_PROPOSAL_ERROR = 1004;
 const TOO_MANY_PROPOSALS_FROM_USER = 1005;
+const PROPOSAL_IS_NOT_COMPLETE_YET = 1006;
 
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
@@ -539,6 +540,93 @@ describe("DAO proposals", () => {
       );
       expect(result.type).toEqual("failed");
       expect(result.exit_code).toEqual(TOO_MANY_PROPOSALS_FROM_USER);
+    });
+  });
+
+  describe("|executes proposal decision", () => {
+    it("checks that proposal exists", async () => {
+      const dao = await DaoProposalsLocal.createFromConfig(
+        await getState({
+          proposals: new Map([]),
+        })
+      );
+      const result = await dao.sendWithProof(randomAddress(), 10, {
+        kind: "execute_decision",
+        proposal_id: 0,
+      });
+      expect(result.type).toEqual("failed");
+      expect(result.exit_code).toEqual(DICT_ERROR);
+    });
+
+    it("checks that proposal already expired", async () => {
+      const dao = await DaoProposalsLocal.createFromConfig(
+        await getState({
+          proposals: new Map([
+            [
+              0,
+              {
+                creator_id: 1,
+                expiration_date: Date.now() + 1000 * 60 * 60 * 24,
+                proposal: {
+                  kind: "remove",
+                  candidate_id: 1,
+                  description: {
+                    text: "1",
+                    length: 1,
+                  },
+                },
+                votes: [new Set(), new Set()],
+              },
+            ],
+          ]),
+        })
+      );
+      const result = await dao.sendWithProof(randomAddress(), 10, {
+        kind: "execute_decision",
+        proposal_id: 0,
+      });
+      expect(result.type).toEqual("failed");
+      expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET);
+    });
+    describe.only("add members proposal", () => {
+      it("checks success condition", async () => {
+        const candidateAddress = randomAddress();
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: Date.now() - 1000 * 1000,
+                  proposal: {
+                    kind: "add",
+                    description: {
+                      text: "1",
+                      length: 1,
+                    },
+                    candidate: {
+                      address: candidateAddress.toString(),
+                      bio: {
+                        text: "1",
+                        length: 1,
+                      },
+                      id: 100,
+                    },
+                  },
+                  votes: [new Set(), new Set([1])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expect(result.type).toEqual("failed");
+        expect(result.exit_code).toEqual(PROPOSAL_IS_NOT_COMPLETE_YET);
+      });
     });
   });
 });
