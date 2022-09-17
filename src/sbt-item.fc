@@ -119,8 +119,6 @@ global cell storage::content;
 
   if (~ init?) {
     throw_unless(405, equal_slices(storage::collection_address, sender_address));
-
-    randomize_lt();
     storage::owner_address = in_msg_body~load_msg_addr();
     storage::content       = in_msg_body~load_ref();
     storage::authority_address = in_msg_body~load_msg_addr();
