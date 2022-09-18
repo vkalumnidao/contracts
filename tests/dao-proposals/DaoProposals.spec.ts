@@ -1,6 +1,6 @@
 import { DaoProposalsLocal } from "./DaoProposalsLocal";
+import { SendMsgAction } from "ton-contract-executor";
 import {
-  Address,
   beginCell,
   Cell,
   CellMessage,
@@ -13,21 +13,22 @@ import {
 import { randomAddress } from "../utils/randomAddress";
 import {
   DaoProposalsState,
-  serializeIEvent,
-  serializeProof,
   unserializeDaoProposalsState,
   unserializeProposal,
-  IEvent,
   Proposal,
-  MembedId,
   ProposalState,
   ProposalAdd,
   ProposalRemove,
   ProposalGeneric,
+  unserializeAddMemberOutMessage,
+  AddMemberOutMessage,
+  serializeMemberInfo,
 } from "./DaoProposals.data";
-import BN from "bn.js";
+import BN, { min } from "bn.js";
 import { SbtItemSource } from "../sbt-item/SbtItem.source";
 import { compileFunc } from "../utils/compileFunc";
+import { Queries as SbtQueries } from "../sbt-item/SbtItem.data";
+import { Queries as NftQueries } from "../nft-collection/NftCollection.data";
 
 const DICT_ERROR = 10;
 const INVALID_ACTION_ERROR = 34;
@@ -43,6 +44,7 @@ const DAO_NOT_INITED_ERROR = 1008;
 const defaultConfig: DaoProposalsState = {
   owner_id: 100,
   proposals: new Map(),
+  next_member_id: 0,
   active_members: {
     init: false,
     voted: new Set(),
@@ -58,6 +60,7 @@ function nowSeconds() {
 const fullConfig: DaoProposalsState = {
   owner_id: 1,
   sbt_item_code: new Cell(),
+  next_member_id: 0,
   active_members: {
     init: true,
     voted: new Set([0, 1, 2]),
@@ -891,7 +894,7 @@ describe("DAO proposals", () => {
                       id: 100,
                     },
                   },
-                  votes: [new Set([0, 1, 2, 3]), new Set([4, 5, 6])],
+                  votes: [new Set([4, 5, 6]), new Set([0, 1, 2, 3])],
                 },
               ],
             ]),
@@ -902,9 +905,55 @@ describe("DAO proposals", () => {
           proposal_id: 0,
         });
         expectSucess(result);
-        expect(result.actionList).toEqual([]);
         const state = await dao.getState();
         expect(state.proposals.size).toEqual(0);
+
+        const mint = result.actionList[0] as SendMsgAction;
+        expect(mint.message.info.dest?.toString()).toEqual(
+          state.nft_collection_address.toString()
+        );
+        const outMessage = unserializeAddMemberOutMessage(
+          mint.message.body.beginParse().readCell().beginParse()
+        );
+        const memberInfo = {
+          bio: {
+            text: "1",
+            length: 1,
+          },
+          id: 100,
+          inviter_id: 1,
+          join_date: expect.any(Number),
+        };
+        const expectedMessage: AddMemberOutMessage = {
+          kind: "add_member",
+          coins: 0,
+          index: 0,
+          op: 1,
+          query_id: 1,
+          body: {
+            auth_address: dao.address.toString(),
+            owner_address: candidateAddress.toString(),
+            content: memberInfo,
+          },
+        };
+        expect(outMessage).toEqual(expectedMessage);
+        // intergrated check
+        const content = beginCell();
+        serializeMemberInfo(content, outMessage.body.content);
+        const sbtInit = SbtQueries.init({
+          auth_address: dao.address,
+          owner_address: candidateAddress,
+          content: content.endCell(),
+        });
+        const mintQuery = NftQueries.mint({
+          queryId: 1,
+          itemIndex: 0,
+          passAmount: new BN(1),
+          nftContent: sbtInit,
+        });
+        expect(mintQuery.toDebugString()).toEqual(
+          mint.message.body.beginParse().readCell().toDebugString()
+        );
       });
     });
   });

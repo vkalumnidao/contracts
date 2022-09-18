@@ -98,8 +98,9 @@ export const Queries = {
     queryId?: number;
     passAmount: BN;
     itemIndex: number;
-    itemOwnerAddress: Address;
-    itemContent: string;
+    itemOwnerAddress?: Address;
+    itemContent?: string;
+    nftContent?: Cell;
   }) => {
     let msgBody = new Cell();
 
@@ -108,17 +109,23 @@ export const Queries = {
     msgBody.bits.writeUint(params.itemIndex, 64);
     msgBody.bits.writeCoins(params.passAmount);
 
-    let itemContent = new Cell();
-    // itemContent.bits.writeString(params.itemContent)
-    itemContent.bits.writeBuffer(Buffer.from(params.itemContent));
+    if (params.nftContent) {
+      msgBody.refs.push(params.nftContent);
+    } else if (
+      params.nftContent &&
+      params.itemContent &&
+      params.itemOwnerAddress
+    ) {
+      let itemContent = new Cell();
+      // itemContent.bits.writeString(params.itemContent)
+      itemContent.bits.writeBuffer(Buffer.from(params.itemContent));
+      let nftItemMessage = new Cell();
 
-    let nftItemMessage = new Cell();
+      nftItemMessage.bits.writeAddress(params.itemOwnerAddress);
+      nftItemMessage.refs.push(itemContent);
 
-    nftItemMessage.bits.writeAddress(params.itemOwnerAddress);
-    nftItemMessage.refs.push(itemContent);
-
-    msgBody.refs.push(nftItemMessage);
-
+      msgBody.refs.push(nftItemMessage);
+    }
     return msgBody;
   },
   batchMint: (params: {

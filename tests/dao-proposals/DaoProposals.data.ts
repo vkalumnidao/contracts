@@ -84,6 +84,7 @@ export type DaoProposalsState = {
   active_members: ActiveMembers;
   nft_collection_address: string;
   proposals: Map<number, ProposalState>;
+  next_member_id: number;
 };
 
 export type CastVote = {
@@ -127,6 +128,27 @@ type Proof<T> = {
   body: T;
   with_content: boolean;
   content?: Cell;
+};
+
+type MemberInfo = {
+  bio: Text;
+  id: number;
+  inviter_id: number;
+  join_date: number;
+};
+
+type SBTInit = {
+  owner_address: string;
+  content: MemberInfo;
+  auth_address: string;
+};
+export type AddMemberOutMessage = {
+  kind: "add_member";
+  op: number;
+  query_id: number;
+  index: number;
+  coins: number;
+  body: SBTInit;
 };
 
 type Event<T> = {
@@ -388,7 +410,10 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
     .storeRef(am.endCell())
     .storeRef(state.sbt_item_code);
   serializeAddress(builder, state.nft_collection_address);
-  return builder.storeDict(dict.endDict()).endCell();
+  return builder
+    .storeDict(dict.endDict())
+    .storeUint(state.next_member_id, 32)
+    .endCell();
 }
 
 export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
@@ -405,12 +430,14 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
   for (let [key, val] of proposalsStr) {
     proposals.set(parseInt(key), val);
   }
+  const nextId = parser.readUintNumber(32);
   return {
     owner_id: owner,
     proposals,
     active_members: activeMembers,
     nft_collection_address: address,
     sbt_item_code: code,
+    next_member_id: nextId,
   };
 }
 
@@ -459,4 +486,53 @@ export function serializeProof<T>(
   if (proof.with_content && proof.content) {
     builder.storeRef(proof.content);
   }
+}
+
+function unserializeMemberInfo(parser: Slice): MemberInfo {
+  const bio = unserializeText(parser.readCell().beginParse());
+  const id = parser.readUintNumber(32);
+  const inviterId = parser.readUintNumber(32);
+  const date = unserializeTime(parser);
+  return {
+    bio,
+    id,
+    inviter_id: inviterId,
+    join_date: date,
+  };
+}
+
+function unserializeSBTInit(parser: Slice): SBTInit {
+  const owner = parser.readAddress();
+  const content = unserializeMemberInfo(parser.readCell().beginParse());
+  const auth = parser.readAddress();
+  return {
+    auth_address: auth?.toString() || "",
+    owner_address: owner?.toString() || "",
+    content,
+  };
+}
+
+export function unserializeAddMemberOutMessage(
+  parser: Slice
+): AddMemberOutMessage {
+  const op = parser.readUintNumber(32);
+  const query = parser.readUintNumber(64);
+  const index = parser.readUintNumber(32);
+  const coins = parser.readCoins().toNumber();
+  const body = unserializeSBTInit(parser.readCell().beginParse());
+  return {
+    body,
+    coins,
+    index,
+    op,
+    query_id: query,
+    kind: "add_member",
+  };
+}
+
+export function serializeMemberInfo(builder: Builder, info: MemberInfo) {
+  serializeText(builder, info.bio);
+  builder.storeUint(info.id, 32);
+  builder.storeUint(info.inviter_id, 32);
+  serializeTime(builder, info.join_date);
 }

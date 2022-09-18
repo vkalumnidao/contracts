@@ -7,42 +7,17 @@ import {
   toNano,
 } from "ton";
 import { randomAddress } from "../utils/randomAddress";
-import {
-  SbtItemData,
-  SbtSingleData,
-  OperationCodes,
-  Queries,
-} from "./SbtItem.data";
+import { SbtItemData, OperationCodes, Queries } from "./SbtItem.data";
 import { SbtItemLocal } from "./SbtItemLocal";
-import { decodeOffChainContent } from "../utils/nftContent";
 import { SendMsgAction } from "ton-contract-executor";
 import BN = require("bn.js");
 
-import { createPrivateKey } from "node:crypto";
 import { Address } from "ton/dist";
 import { ReserveCurrencyAction } from "ton-contract-executor/dist/utils/parseActionList";
-
-const privateKey = createPrivateKey(
-  "-----BEGIN PRIVATE KEY-----\n" +
-    "MC4CAQAwBQYDK2VwBCIEIA1scXXBIFR8kubx8NyDPx5uTOzxtl2RZjgdHZhBG3v3\n" +
-    "-----END PRIVATE KEY-----"
-);
-
-const privateKey2 = createPrivateKey(
-  "-----BEGIN PRIVATE KEY-----\n" +
-    "MC4CAQAwBQYDK2VwBCIEIM6tgvtZK8ZQBwlVplZb1FxgtSgM8E6PnoQqhxZhiO5G\n" +
-    "-----END PRIVATE KEY-----\n"
-);
-
-const pubKey = new BN(
-  "56001581745923382025098559417434591897568074235951937438714082547311791744987",
-  10
-);
 
 const OWNER_ADDRESS = randomAddress();
 const AUTHORITY_ADDRESS = randomAddress();
 const COLLECTION_ADDRESS = randomAddress();
-const EDITOR_ADDRESS = randomAddress();
 
 const defaultConfig: SbtItemData = {
   index: 777,
@@ -50,13 +25,7 @@ const defaultConfig: SbtItemData = {
   ownerAddress: OWNER_ADDRESS,
   authorityAddress: AUTHORITY_ADDRESS,
   content: "test",
-};
-
-const singleConfig: SbtSingleData = {
-  ownerAddress: OWNER_ADDRESS,
-  editorAddress: EDITOR_ADDRESS,
-  content: "test_content",
-  authorityAddress: AUTHORITY_ADDRESS,
+  init: true,
 };
 
 describe("sbt item smc", () => {
@@ -91,6 +60,22 @@ describe("sbt item smc", () => {
       defaultConfig.ownerAddress!.toFriendly()
     );
     expect(res.content).toEqual(defaultConfig.content);
+  });
+
+  it("inintializes sbt item", async () => {
+    let sbt = await SbtItemLocal.createFromConfig({
+      ...defaultConfig,
+      init: false,
+    });
+    expect(await sbt.getAuthority()).toBe(null);
+    const auth = randomAddress();
+    const res = await sbt.sendInit(defaultConfig.collectionAddress, {
+      auth_address: auth,
+      content: new Cell(),
+      owner_address: randomAddress(),
+    });
+    expect(res.type).toEqual("success");
+    expect((await sbt.getAuthority())?.toString()).toEqual(auth.toString());
   });
 
   it("should return editor", async () => {

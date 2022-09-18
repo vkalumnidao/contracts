@@ -10,13 +10,7 @@ import {
   toNano,
 } from "ton";
 import BN from "bn.js";
-import {
-  buildSbtItemDataCell,
-  buildSingleSbtDataCell,
-  SbtItemData,
-  SbtSingleData,
-  Queries,
-} from "./SbtItem.data";
+import { buildSbtItemDataCell, SbtItemData, Queries } from "./SbtItem.data";
 import { SbtItemSource } from "./SbtItem.source";
 import { decodeOffChainContent } from "../utils/nftContent";
 import { compileFunc } from "../utils/compileFunc";
@@ -85,6 +79,9 @@ export class SbtItemLocal {
     }
 
     let [key] = res.result as [Slice];
+    if (key == null) {
+      return null;
+    }
 
     return key.readAddress();
   }
@@ -156,6 +153,24 @@ export class SbtItemLocal {
         bounce: false,
         body: new CommonMessageInfo({
           body: new CellMessage(msgBody),
+        }),
+      })
+    );
+  }
+
+  sendInit(
+    from: Address,
+    params: { owner_address: Address; content: Cell; auth_address: Address }
+  ) {
+    const query = Queries.init(params);
+    return this.contract.sendInternalMessage(
+      new InternalMessage({
+        to: this.address,
+        from: from,
+        value: toNano(1),
+        bounce: true,
+        body: new CommonMessageInfo({
+          body: new CellMessage(query),
         }),
       })
     );

@@ -7,20 +7,26 @@ import { beginCell } from "ton/dist";
 
 export type SbtItemData = {
   index: number;
-  collectionAddress: Address | null;
+  collectionAddress: Address;
   ownerAddress: Address;
   authorityAddress: Address;
   content: string;
+  init: boolean;
 };
 
 export function buildSbtItemDataCell(data: SbtItemData) {
   let dataCell = new Cell();
 
   let contentCell = new Cell();
-  contentCell.bits.writeBuffer(Buffer.from(data.content));
 
   dataCell.bits.writeUint(data.index, 64);
   dataCell.bits.writeAddress(data.collectionAddress);
+
+  if (!data.init) {
+    return dataCell;
+  }
+
+  contentCell.bits.writeBuffer(Buffer.from(data.content));
   dataCell.bits.writeAddress(data.ownerAddress);
   dataCell.refs.push(contentCell);
   dataCell.bits.writeAddress(data.authorityAddress);
@@ -45,26 +51,6 @@ export function buildSbtItemDeployMessage(conf: {
   };
 }
 
-export type SbtSingleData = {
-  ownerAddress: Address;
-  editorAddress: Address;
-  content: string;
-  authorityAddress: Address;
-};
-
-export function buildSingleSbtDataCell(data: SbtSingleData) {
-  let dataCell = new Cell();
-
-  let contentCell = encodeOffChainContent(data.content);
-
-  dataCell.bits.writeAddress(data.ownerAddress);
-  dataCell.bits.writeAddress(data.editorAddress);
-  dataCell.refs.push(contentCell);
-  dataCell.bits.writeAddress(data.authorityAddress);
-
-  return dataCell;
-}
-
 export const OperationCodes = {
   transfer: 0x5fcc3d14,
   excesses: 0xd53276db,
@@ -82,6 +68,17 @@ export const OperationCodes = {
 };
 
 export const Queries = {
+  init(param: {
+    owner_address: Address;
+    content: Cell;
+    auth_address: Address;
+  }) {
+    return beginCell()
+      .storeAddress(param.owner_address)
+      .storeRef(param.content)
+      .storeAddress(param.auth_address)
+      .endCell();
+  },
   transfer: (params: {
     queryId?: number;
     newOwner: Address | null;
