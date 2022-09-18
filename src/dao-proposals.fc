@@ -98,6 +98,15 @@ cell storage_get_active_members() {
   return (voted, votes_for);
 }
 
+int count_ones(int bit_votes) inline {
+  var count = 0;
+  while(bit_votes) {
+    bit_votes &= (bit_votes - 1);
+    count += 1;
+  }
+  return count;
+}
+
 int storage_count_votes(cell votes, int vote_for) {
   var (voted, votes_for) = storage_get_votes(votes);
 
@@ -107,12 +116,7 @@ int storage_count_votes(cell votes, int vote_for) {
   } else {
     bit_votes = voted ^ votes_for;
   }
-  var count = 0;
-  while(bit_votes) {
-    bit_votes &= (bit_votes - 1);
-    count += 1;
-  }
-  return count;
+  return count_ones(bit_votes);
 }
 
 int storage_count_proposal_yays(int proposal_id) method_id {
@@ -386,7 +390,7 @@ cell update_votes(int member_id, cell votes, int vote_for) {
     return serialize_active_members(nwmembers);
   }
 
-  () add_dao_member(int creator_id, cell votes, slice add_proposal) impure {
+  () try_add_dao_member(int creator_id, cell votes, slice add_proposal) impure {
     var yays = storage_count_votes(votes, true);
     var nays = storage_count_votes(votes, false);
     if ((yays <= nays) | (yays < 2)) {
@@ -414,7 +418,7 @@ cell update_votes(int member_id, cell votes, int vote_for) {
 
     var (owner_id, amembers, code, nft_address, proposals, next_index) = storate_get_dao_state();
     ;; add_dao_member$_ op:uint32=1 query_id:uint64 index:uint64 coins:uint128 body:^SBTInit = OutMesage
-    var add_dao_member_body = begin_cell()
+    var add_dao_member_body = begin_cell() ;; TODO: may be we should make dao contract NFT collection itself
       .store_uint(1, 32)
       .store_uint(1, 64)
       .store_uint(next_index, 64)
@@ -434,6 +438,38 @@ cell update_votes(int member_id, cell votes, int vote_for) {
     storage_set_state(owner_id, add_active_member(amembers, next_index), code, nft_address, proposals, next_index + 1);
   }
 
+  () try_remove_dao_member(cell votes, slice remove_proposal) impure {
+    var (_, amembers, code, nft, _, _) = storate_get_dao_state();
+    var [init, active_votes] = parse_active_members(amembers);
+    throw_unless(DAO_NOT_INITED_ERROR, init);
+    var quorum = count_ones(active_votes) ^/ 2;
+    var yays = storage_count_votes(votes, true);
+    var nays = storage_count_votes(votes, false);
+    if (yays <= nays) {
+      return (); ;; vote is not successful
+    }
+    if ((yays + nays) < quorum) {
+      return (); ;; no quorum
+    }
+
+    var [member_id, _] = remove_proposal~parse_remove_member_proposal();
+    var sbt_address = calculate_nft_item_address_init(member_id, code, nft);
+
+    ;; destroy sbt and send back all its coins
+    var revoke_message = begin_cell()
+      .store_uint(op::destroy(), 32)
+      .end_cell();
+
+    var msg = begin_cell()
+      .store_uint(0x18, 6)
+      .store_slice(sbt_address)
+      .store_coins(0) ;; TODO: estimate coins needed to destroy token
+      .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+      .store_ref(revoke_message)
+      .end_cell();
+    send_raw_message(msg, 1);
+  }
+
   () execute_decision(int member_id, slice data) impure {
     var proposal_id = data~load_uint(PROPOSALS_BITS);
     var (creator_id, expiration_date, votes, body) = storage_get_proposal(proposal_id);
@@ -445,7 +481,11 @@ cell update_votes(int member_id, cell votes, int vote_for) {
       calibrate_dao_members(votes);
     }
     if (tp == PROPOSAL_TYPE_ADD_MEMBER) {
-      add_dao_member(creator_id, votes, proposal);
+      try_add_dao_member(creator_id, votes, proposal);
+    }
+
+    if (tp == PROPOSAL_TYPE_REMOVE_MEMBER) {
+      try_remove_dao_member(votes, proposal);
     }
     var proposals = storage_get_proposals();
     var success = proposals~udict_delete?(PROPOSALS_BITS, proposal_id);

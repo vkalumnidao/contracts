@@ -165,40 +165,45 @@ describe("sbt item smc", () => {
     expect(res.exit_code).toEqual(404);
   });
 
-  it("should destroy", async () => {
-    let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
-    let res = await sbt.contract.sendInternalMessage(
-      new InternalMessage({
-        to: sbt.address,
-        from: defaultConfig.ownerAddress,
-        value: toNano(1),
-        bounce: false,
-        body: new CommonMessageInfo({
-          body: new CellMessage(Queries.destroy({})),
-        }),
-      })
-    );
+  [
+    { name: "owner", address: OWNER_ADDRESS },
+    { name: "authority", address: AUTHORITY_ADDRESS },
+  ].forEach((param) => {
+    it(`should destroy from ${param.name}`, async () => {
+      let sbt = await SbtItemLocal.createFromConfig(defaultConfig);
+      let res = await sbt.contract.sendInternalMessage(
+        new InternalMessage({
+          to: sbt.address,
+          from: param.address,
+          value: toNano(1),
+          bounce: false,
+          body: new CommonMessageInfo({
+            body: new CellMessage(Queries.destroy({})),
+          }),
+        })
+      );
 
-    expect(res.exit_code).toEqual(0);
-    let [reserve, responseMessage] = res.actionList as [
-      ReserveCurrencyAction,
-      SendMsgAction
-    ];
-    let response = responseMessage.message.body.beginParse();
+      expect(res.exit_code).toEqual(0);
+      let [reserve, responseMessage] = res.actionList as [
+        ReserveCurrencyAction,
+        SendMsgAction
+      ];
+      let response = responseMessage.message.body.beginParse();
 
-    let op = response.readUintNumber(32);
-    expect(op).toEqual(OperationCodes.excesses);
-    expect(reserve.currency.coins.toNumber()).toEqual(
-      toNano("0.05").toNumber()
-    );
+      let op = response.readUintNumber(32);
+      expect(op).toEqual(OperationCodes.excesses);
+      expect(reserve.currency.coins.toNumber()).toEqual(
+        toNano("0.05").toNumber()
+      );
 
-    let data = await sbt.getNftData();
-    if (!data.isInitialized) {
-      throw new Error();
-    }
+      let data = await sbt.getNftData();
+      if (!data.isInitialized) {
+        throw new Error();
+      }
 
-    expect(data.ownerAddress).toEqual(null);
-    expect(await sbt.getAuthority()).toEqual(null);
+      expect(data.ownerAddress).toEqual(null);
+      expect(await sbt.getAuthority()).toEqual(null);
+    });
   });
 
   it("should not destroy", async () => {
@@ -206,7 +211,7 @@ describe("sbt item smc", () => {
     let res = await sbt.contract.sendInternalMessage(
       new InternalMessage({
         to: sbt.address,
-        from: defaultConfig.authorityAddress,
+        from: randomAddress(),
         value: toNano(1),
         bounce: false,
         body: new CommonMessageInfo({

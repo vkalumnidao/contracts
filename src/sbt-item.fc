@@ -204,9 +204,11 @@ global cell storage::content;
     return ();
   }
   if (op == op::destroy()) {
-    throw_unless(401, equal_slices(storage::owner_address, sender_address));
+    var is_owner = equal_slices(storage::owner_address, sender_address);
+    var is_authority = equal_slices(storage::authority_address, sender_address);
+    throw_unless(401, is_owner | is_authority);
     raw_reserve(min_tons_for_storage(),0);
-    send_msg(flag::regular(), sender_address, 0, op::excesses(), query_id, null(), 128);
+    send_msg(flag::regular(), storage::owner_address, 0, op::excesses(), query_id, null(), 128);
 
     storage::owner_address = null_addr();
     storage::authority_address = null_addr();

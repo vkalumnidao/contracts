@@ -17,7 +17,7 @@ type Text = {
   text: string;
   length: number;
 };
-type Candidate = {
+export type Candidate = {
   id: number;
   bio: Text;
   address: string;

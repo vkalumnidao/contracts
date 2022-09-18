@@ -23,11 +23,15 @@ import {
   unserializeAddMemberOutMessage,
   AddMemberOutMessage,
   serializeMemberInfo,
+  Candidate,
 } from "./DaoProposals.data";
 import BN, { min } from "bn.js";
 import { SbtItemSource } from "../sbt-item/SbtItem.source";
 import { compileFunc } from "../utils/compileFunc";
-import { Queries as SbtQueries } from "../sbt-item/SbtItem.data";
+import {
+  OperationCodes,
+  Queries as SbtQueries,
+} from "../sbt-item/SbtItem.data";
 import { Queries as NftQueries } from "../nft-collection/NftCollection.data";
 
 const DICT_ERROR = 10;
@@ -57,6 +61,43 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+const defaultAddPrposal: ProposalAdd = {
+  kind: "add",
+  candidate: {
+    bio: {
+      length: 4,
+      text: "test",
+    },
+    address: randomAddress().toString(),
+    id: 2,
+  },
+  description: {
+    length: 4,
+    text: "test",
+  },
+};
+
+const defaulRemoveProposal: ProposalRemove = {
+  kind: "remove",
+  candidate_id: 1,
+  description: {
+    length: 1,
+    text: "1",
+  },
+};
+
+const defaultGenericProposal: ProposalGeneric = {
+  description: {
+    length: 1,
+    text: "t",
+  },
+  topic: {
+    length: 1,
+    text: "t",
+  },
+  kind: "generic",
+};
+
 const fullConfig: DaoProposalsState = {
   owner_id: 1,
   sbt_item_code: new Cell(),
@@ -66,32 +107,44 @@ const fullConfig: DaoProposalsState = {
     voted: new Set([0, 1, 2]),
   },
   nft_collection_address: randomAddress().toString(),
-  proposals: new Map([
-    [
-      0,
-      {
-        expiration_date: nowSeconds(),
-        creator_id: 1,
-        votes: [new Set(), new Set([1])],
-        proposal: {
-          kind: "add",
-          candidate: {
-            bio: {
-              length: 4,
-              text: "test",
-            },
-            address: randomAddress().toString(),
-            id: 2,
-          },
-          description: {
-            length: 4,
-            text: "test",
-          },
-        },
-      },
-    ],
-  ]),
+  proposals: new Map([[0, getProposal()]]),
 };
+
+function getProposal(
+  state: Partial<ProposalState> = {},
+  proposal: Proposal = getAddProposal()
+): ProposalState {
+  return {
+    expiration_date: nowSeconds(),
+    creator_id: 1,
+    votes: [new Set(), new Set([1])],
+    proposal: proposal,
+    ...state,
+  };
+}
+
+function getAddProposal(
+  proposal: Partial<ProposalAdd> = {},
+  candidate: Partial<Candidate> = defaultAddPrposal.candidate
+): ProposalAdd {
+  return {
+    ...defaultAddPrposal,
+    candidate: { ...defaultAddPrposal.candidate, ...candidate },
+    ...proposal,
+  };
+}
+
+function getRemoveProposal(
+  proposal: Partial<ProposalRemove> = {}
+): ProposalRemove {
+  return { ...defaulRemoveProposal, ...proposal };
+}
+
+function getGenericProposal(
+  proposal: Partial<ProposalGeneric> = {}
+): ProposalGeneric {
+  return { ...defaultGenericProposal, ...proposal };
+}
 
 async function getState(
   state: Partial<DaoProposalsState>
@@ -300,14 +353,7 @@ describe("DAO proposals", () => {
   });
 
   describe("|select new proposal id", () => {
-    const removeProposal: Proposal = {
-      kind: "remove",
-      candidate_id: 1,
-      description: {
-        length: 1,
-        text: "1",
-      },
-    };
+    const removeProposal: Proposal = getRemoveProposal();
 
     const removeProposalState: ProposalState = {
       expiration_date: nowSeconds(),
@@ -390,14 +436,7 @@ describe("DAO proposals", () => {
 
   describe("|create proposals", () => {
     it("creates proposal before first calibration vote", async () => {
-      const removeProposal: ProposalRemove = {
-        kind: "remove",
-        candidate_id: 1,
-        description: {
-          text: "1",
-          length: 1,
-        },
-      };
+      const removeProposal: ProposalRemove = getRemoveProposal();
       let dao = await DaoProposalsLocal.createFromConfig(
         await getState({
           proposals: new Map(),
@@ -417,21 +456,7 @@ describe("DAO proposals", () => {
       expect(result.exit_code).toEqual(DAO_NOT_INITED_ERROR);
     });
     it("creates add member proposal", async () => {
-      const addProposal: ProposalAdd = {
-        kind: "add",
-        description: {
-          text: "1",
-          length: 1,
-        },
-        candidate: {
-          address: randomAddress().toString(),
-          bio: {
-            length: 4,
-            text: "test",
-          },
-          id: 100,
-        },
-      };
+      const addProposal: ProposalAdd = getAddProposal({});
       let dao = await DaoProposalsLocal.createFromConfig(
         await getState({
           proposals: new Map(),
@@ -474,14 +499,7 @@ describe("DAO proposals", () => {
     });
 
     it("creates remove member proposal", async () => {
-      const removeProposal: ProposalRemove = {
-        candidate_id: 100,
-        description: {
-          text: "t",
-          length: 1,
-        },
-        kind: "remove",
-      };
+      const removeProposal: ProposalRemove = getRemoveProposal();
       let dao = await DaoProposalsLocal.createFromConfig(
         await getState({
           proposals: new Map(),
@@ -518,17 +536,7 @@ describe("DAO proposals", () => {
     });
 
     it("creates generic proposal", async () => {
-      const genericProposal: ProposalGeneric = {
-        description: {
-          length: 1,
-          text: "t",
-        },
-        topic: {
-          length: 1,
-          text: "t",
-        },
-        kind: "generic",
-      };
+      const genericProposal: ProposalGeneric = getGenericProposal();
       let dao = await DaoProposalsLocal.createFromConfig(
         await getState({
           proposals: new Map(),
@@ -569,14 +577,9 @@ describe("DAO proposals", () => {
     });
 
     it("tries to create second proposal from the same member", async () => {
-      const removeProposal: ProposalRemove = {
+      const removeProposal: ProposalRemove = getRemoveProposal({
         candidate_id: 100,
-        description: {
-          text: "t",
-          length: 1,
-        },
-        kind: "remove",
-      };
+      });
       let dao = await DaoProposalsLocal.createFromConfig(
         await getState({
           proposals: new Map([
@@ -644,19 +647,11 @@ describe("DAO proposals", () => {
           proposals: new Map([
             [
               0,
-              {
+              getProposal({
                 creator_id: 1,
                 expiration_date: nowSeconds() + 60 * 60 * 24,
-                proposal: {
-                  kind: "remove",
-                  candidate_id: 1,
-                  description: {
-                    text: "1",
-                    length: 1,
-                  },
-                },
-                votes: [new Set(), new Set()],
-              },
+                proposal: getRemoveProposal(),
+              }),
             ],
           ]),
         })
@@ -705,168 +700,60 @@ describe("DAO proposals", () => {
       });
     });
     describe("add members proposal", () => {
-      it("nobody votes — do not add", async () => {
-        const candidateAddress = randomAddress();
-        const dao = await DaoProposalsLocal.createFromConfig(
-          await getState({
-            proposals: new Map([
-              [
-                0,
-                {
-                  creator_id: 1,
-                  expiration_date: nowSeconds() - 1000,
-                  proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
-                      id: 100,
-                    },
+      [
+        {
+          name: "nobody votes",
+          yay: [],
+          nay: [],
+        },
+        {
+          name: "not enough votes",
+          nay: [],
+          yay: [1],
+        },
+        {
+          name: "equal votes",
+          nay: [0, 1],
+          yay: [2, 3],
+        },
+        {
+          name: "minority votes",
+          yay: [0],
+          nay: [1, 2, 3],
+        },
+      ].forEach((param) => {
+        it(`${param.name} — do not add`, async () => {
+          const candidateAddress = randomAddress();
+          const dao = await DaoProposalsLocal.createFromConfig(
+            await getState({
+              proposals: new Map([
+                [
+                  0,
+                  {
+                    creator_id: 1,
+                    expiration_date: nowSeconds() - 1000,
+                    proposal: getAddProposal(
+                      {},
+                      {
+                        id: 100,
+                        address: candidateAddress.toString(),
+                      }
+                    ),
+                    votes: [new Set(param.nay), new Set(param.yay)],
                   },
-                  votes: [new Set(), new Set()],
-                },
-              ],
-            ]),
-          })
-        );
-        const result = await dao.sendWithProof(randomAddress(), 10, {
-          kind: "execute_decision",
-          proposal_id: 0,
+                ],
+              ]),
+            })
+          );
+          const result = await dao.sendWithProof(randomAddress(), 10, {
+            kind: "execute_decision",
+            proposal_id: 0,
+          });
+          expectSucess(result);
+          expect(result.actionList).toEqual([]);
+          const state = await dao.getState();
+          expect(state.proposals.size).toEqual(0);
         });
-        expectSucess(result);
-        expect(result.actionList).toEqual([]);
-        const state = await dao.getState();
-        expect(state.proposals.size).toEqual(0);
-      });
-
-      it("not enough votes — do not add", async () => {
-        const candidateAddress = randomAddress();
-        const dao = await DaoProposalsLocal.createFromConfig(
-          await getState({
-            proposals: new Map([
-              [
-                0,
-                {
-                  creator_id: 1,
-                  expiration_date: nowSeconds() - 1000,
-                  proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
-                      id: 100,
-                    },
-                  },
-                  votes: [new Set(), new Set([1])],
-                },
-              ],
-            ]),
-          })
-        );
-        const result = await dao.sendWithProof(randomAddress(), 10, {
-          kind: "execute_decision",
-          proposal_id: 0,
-        });
-        expectSucess(result);
-        expect(result.actionList).toEqual([]);
-        const state = await dao.getState();
-        expect(state.proposals.size).toEqual(0);
-      });
-
-      it("equal votes — do not add", async () => {
-        const candidateAddress = randomAddress();
-        const dao = await DaoProposalsLocal.createFromConfig(
-          await getState({
-            proposals: new Map([
-              [
-                0,
-                {
-                  creator_id: 1,
-                  expiration_date: nowSeconds() - 1000,
-                  proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
-                      id: 100,
-                    },
-                  },
-                  votes: [new Set([0]), new Set([1])],
-                },
-              ],
-            ]),
-          })
-        );
-        const result = await dao.sendWithProof(randomAddress(), 10, {
-          kind: "execute_decision",
-          proposal_id: 0,
-        });
-        expectSucess(result);
-        expect(result.actionList).toEqual([]);
-        const state = await dao.getState();
-        expect(state.proposals.size).toEqual(0);
-      });
-
-      it("minority votes — do not add", async () => {
-        const candidateAddress = randomAddress();
-        const dao = await DaoProposalsLocal.createFromConfig(
-          await getState({
-            proposals: new Map([
-              [
-                0,
-                {
-                  creator_id: 1,
-                  expiration_date: nowSeconds() - 1000,
-                  proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
-                      id: 100,
-                    },
-                  },
-                  votes: [new Set([0, 1, 2, 3]), new Set([4, 5, 6])],
-                },
-              ],
-            ]),
-          })
-        );
-        const result = await dao.sendWithProof(randomAddress(), 10, {
-          kind: "execute_decision",
-          proposal_id: 0,
-        });
-        expectSucess(result);
-        expect(result.actionList).toEqual([]);
-        const state = await dao.getState();
-        expect(state.proposals.size).toEqual(0);
       });
 
       it("majority votes — do add", async () => {
@@ -879,21 +766,13 @@ describe("DAO proposals", () => {
                 {
                   creator_id: 1,
                   expiration_date: nowSeconds() - 1000,
-                  proposal: {
-                    kind: "add",
-                    description: {
-                      text: "1",
-                      length: 1,
-                    },
-                    candidate: {
-                      address: candidateAddress.toString(),
-                      bio: {
-                        text: "1",
-                        length: 1,
-                      },
+                  proposal: getAddProposal(
+                    {},
+                    {
                       id: 100,
-                    },
-                  },
+                      address: candidateAddress.toString(),
+                    }
+                  ),
                   votes: [new Set([4, 5, 6]), new Set([0, 1, 2, 3])],
                 },
               ],
@@ -917,8 +796,8 @@ describe("DAO proposals", () => {
         );
         const memberInfo = {
           bio: {
-            text: "1",
-            length: 1,
+            text: "test",
+            length: 4,
           },
           id: 100,
           inviter_id: 1,
@@ -954,6 +833,94 @@ describe("DAO proposals", () => {
         expect(mintQuery.toDebugString()).toEqual(
           mint.message.body.beginParse().readCell().toDebugString()
         );
+      });
+    });
+
+    describe("remove members proposal", () => {
+      [
+        {
+          name: "no quorum",
+          members: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+          nay: [4, 5],
+          yay: [0, 1, 2],
+        },
+        {
+          name: "equal votes",
+          members: [0, 1, 2, 3],
+          nay: [0, 1],
+          yay: [2, 3],
+        },
+        {
+          name: "less votes for",
+          members: [0, 1, 2, 3],
+          nay: [0, 1],
+          yay: [2],
+        },
+      ].forEach((params) => {
+        it(`${params.name} — do not remove`, async () => {
+          const dao = await DaoProposalsLocal.createFromConfig(
+            await getState({
+              active_members: {
+                init: true,
+                voted: new Set(params.members),
+              },
+              proposals: new Map([
+                [
+                  0,
+                  {
+                    creator_id: 1,
+                    expiration_date: nowSeconds() - 1000,
+                    proposal: getRemoveProposal(),
+                    votes: [new Set(params.nay), new Set(params.yay)],
+                  },
+                ],
+              ]),
+            })
+          );
+          const result = await dao.sendWithProof(randomAddress(), 10, {
+            kind: "execute_decision",
+            proposal_id: 0,
+          });
+          expectSucess(result);
+          expect(result.actionList).toEqual([]);
+          const state = await dao.getState();
+          expect(state.proposals.size).toEqual(0);
+        });
+      });
+
+      it("quorum and more votes for — remove", async () => {
+        const dao = await DaoProposalsLocal.createFromConfig(
+          await getState({
+            active_members: {
+              init: true,
+              voted: new Set([0, 1, 2, 3, 4, 5]),
+            },
+            proposals: new Map([
+              [
+                0,
+                {
+                  creator_id: 1,
+                  expiration_date: nowSeconds() - 1000,
+                  proposal: getRemoveProposal(),
+                  votes: [new Set([0, 1]), new Set([2, 3, 4])],
+                },
+              ],
+            ]),
+          })
+        );
+        const result = await dao.sendWithProof(randomAddress(), 10, {
+          kind: "execute_decision",
+          proposal_id: 0,
+        });
+        expectSucess(result);
+        const removeMessage = result.actionList[0] as SendMsgAction;
+        const body = removeMessage.message.body.beginParse().readRef();
+        const op = body.readUintNumber(32);
+        expect(op).toEqual(OperationCodes.Destroy);
+        expect(body.remaining).toEqual(0);
+        expect(body.remainingRefs).toEqual(0);
+        const state = await dao.getState();
+        expect(state.proposals.size).toEqual(0);
       });
     });
   });
