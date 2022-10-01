@@ -1,7 +1,6 @@
 import { Address, Cell } from "ton";
 import BN from "bn.js";
 import { encodeOffChainContent } from "../utils/nftContent";
-import { Queries as CollectionQueries } from "../nft-collection/NftCollection.data";
 
 import { beginCell } from "ton/dist";
 
@@ -32,23 +31,6 @@ export function buildSbtItemDataCell(data: SbtItemData) {
   dataCell.bits.writeAddress(data.authorityAddress);
 
   return dataCell;
-}
-
-export function buildSbtItemDeployMessage(conf: {
-  queryId?: number;
-  collectionAddress: Address;
-  passAmount: BN;
-  itemIndex: number;
-  itemOwnerAddress: Address;
-  itemContent: string;
-  ownerPubKey: BN;
-}) {
-  let msgBody = CollectionQueries.mint(conf);
-
-  return {
-    messageBody: msgBody,
-    collectionAddress: conf.collectionAddress,
-  };
 }
 
 export const OperationCodes = {

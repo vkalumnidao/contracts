@@ -82,7 +82,6 @@ export type DaoProposalsState = {
   owner_id: number;
   sbt_item_code: Cell;
   active_members: ActiveMembers;
-  nft_collection_address: string;
   proposals: Map<number, ProposalState>;
   next_member_id: number;
 };
@@ -137,18 +136,10 @@ type MemberInfo = {
   join_date: number;
 };
 
-type SBTInit = {
+export type SBTInit = {
   owner_address: string;
   content: MemberInfo;
   auth_address: string;
-};
-export type AddMemberOutMessage = {
-  kind: "add_member";
-  op: number;
-  query_id: number;
-  index: number;
-  coins: number;
-  body: SBTInit;
 };
 
 type Event<T> = {
@@ -409,7 +400,6 @@ export function serializeDaoProposalsState(state: DaoProposalsState): Cell {
     .storeUint(state.owner_id, MEMBER_ID_BITS)
     .storeRef(am.endCell())
     .storeRef(state.sbt_item_code);
-  serializeAddress(builder, state.nft_collection_address);
   return builder
     .storeDict(dict.endDict())
     .storeUint(state.next_member_id, 32)
@@ -422,7 +412,6 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
     parser.readCell().beginParse()
   );
   const code = parser.readCell();
-  const address = unserializeAddress(parser);
   const proposalsStr = unserializeDict(PROPOSAL_BITS, parser, (slice) => {
     return unserializeProposalState(slice);
   });
@@ -435,7 +424,6 @@ export function unserializeDaoProposalsState(parser: Slice): DaoProposalsState {
     owner_id: owner,
     proposals,
     active_members: activeMembers,
-    nft_collection_address: address,
     sbt_item_code: code,
     next_member_id: nextId,
   };
@@ -501,7 +489,7 @@ function unserializeMemberInfo(parser: Slice): MemberInfo {
   };
 }
 
-function unserializeSBTInit(parser: Slice): SBTInit {
+export function unserializeSBTInit(parser: Slice): SBTInit {
   const owner = parser.readAddress();
   const content = unserializeMemberInfo(parser.readCell().beginParse());
   const auth = parser.readAddress();
@@ -509,24 +497,6 @@ function unserializeSBTInit(parser: Slice): SBTInit {
     auth_address: auth?.toString() || "",
     owner_address: owner?.toString() || "",
     content,
-  };
-}
-
-export function unserializeAddMemberOutMessage(
-  parser: Slice
-): AddMemberOutMessage {
-  const op = parser.readUintNumber(32);
-  const query = parser.readUintNumber(64);
-  const index = parser.readUintNumber(32);
-  const coins = parser.readCoins().toNumber();
-  const body = unserializeSBTInit(parser.readCell().beginParse());
-  return {
-    body,
-    coins,
-    index,
-    op,
-    query_id: query,
-    kind: "add_member",
   };
 }
 

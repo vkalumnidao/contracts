@@ -20,10 +20,10 @@ import {
   ProposalAdd,
   ProposalRemove,
   ProposalGeneric,
-  unserializeAddMemberOutMessage,
-  AddMemberOutMessage,
   serializeMemberInfo,
   Candidate,
+  unserializeSBTInit,
+  SBTInit,
 } from "./DaoProposals.data";
 import BN, { min } from "bn.js";
 import { SbtItemSource } from "../sbt-item/SbtItem.source";
@@ -32,7 +32,6 @@ import {
   OperationCodes,
   Queries as SbtQueries,
 } from "../sbt-item/SbtItem.data";
-import { Queries as NftQueries } from "../nft-collection/NftCollection.data";
 
 const DICT_ERROR = 10;
 const INVALID_ACTION_ERROR = 34;
@@ -54,7 +53,6 @@ const defaultConfig: DaoProposalsState = {
     voted: new Set(),
   },
   sbt_item_code: new Cell(),
-  nft_collection_address: randomAddress().toString(),
 };
 
 function nowSeconds() {
@@ -106,7 +104,6 @@ const fullConfig: DaoProposalsState = {
     init: true,
     voted: new Set([0, 1, 2]),
   },
-  nft_collection_address: randomAddress().toString(),
   proposals: new Map([[0, getProposal()]]),
 };
 
@@ -160,7 +157,6 @@ function expectStateEquality(
   second: DaoProposalsState
 ) {
   expect(first.owner_id).toEqual(second.owner_id);
-  expect(first.nft_collection_address).toEqual(second.nft_collection_address);
   expect(first.proposals).toEqual(second.proposals);
   expect(first.sbt_item_code.toString()).toEqual(
     second.sbt_item_code.toString()
@@ -788,12 +784,7 @@ describe("DAO proposals", () => {
         expect(state.proposals.size).toEqual(0);
 
         const mint = result.actionList[0] as SendMsgAction;
-        expect(mint.message.info.dest?.toString()).toEqual(
-          state.nft_collection_address.toString()
-        );
-        const outMessage = unserializeAddMemberOutMessage(
-          mint.message.body.beginParse().readCell().beginParse()
-        );
+        const outMessage = unserializeSBTInit(mint.message.body.beginParse());
         const memberInfo = {
           bio: {
             text: "test",
@@ -803,35 +794,22 @@ describe("DAO proposals", () => {
           inviter_id: 1,
           join_date: expect.any(Number),
         };
-        const expectedMessage: AddMemberOutMessage = {
-          kind: "add_member",
-          coins: 0,
-          index: 0,
-          op: 1,
-          query_id: 1,
-          body: {
-            auth_address: dao.address.toString(),
-            owner_address: candidateAddress.toString(),
-            content: memberInfo,
-          },
+        const expectedMessage: SBTInit = {
+          auth_address: dao.address.toString(),
+          owner_address: candidateAddress.toString(),
+          content: memberInfo,
         };
         expect(outMessage).toEqual(expectedMessage);
-        // intergrated check
+        // // intergrated check
         const content = beginCell();
-        serializeMemberInfo(content, outMessage.body.content);
+        serializeMemberInfo(content, outMessage.content);
         const sbtInit = SbtQueries.init({
           auth_address: dao.address,
           owner_address: candidateAddress,
           content: content.endCell(),
         });
-        const mintQuery = NftQueries.mint({
-          queryId: 1,
-          itemIndex: 0,
-          passAmount: new BN(1),
-          nftContent: sbtInit,
-        });
-        expect(mintQuery.toDebugString()).toEqual(
-          mint.message.body.beginParse().readCell().toDebugString()
+        expect(sbtInit.toDebugString()).toEqual(
+          mint.message.body.toDebugString()
         );
       });
     });

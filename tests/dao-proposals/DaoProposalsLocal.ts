@@ -76,13 +76,7 @@ export class DaoProposalsLocal {
         },
         {
           type: "cell_slice",
-          value: cellToBoc(
-            beginCell()
-              .storeAddress(
-                Address.parseRaw(this.initState.nft_collection_address)
-              )
-              .endCell()
-          ),
+          value: cellToBoc(beginCell().storeAddress(this.address).endCell()),
         },
       ]
     );
